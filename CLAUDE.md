@@ -13,11 +13,15 @@ pip install -e severe_weather_model/
 # 1. Build label grids from SPC LSR SQLite archive
 python scripts/build_labels.py --config config.yaml --years 2016 2017 2018 2019 2020 2021 2022 2023
 
-# 2. Build feature zarr store from GraphCast NetCDF files
+# 2a. Build feature zarr store from GraphCast NetCDF files
 # Process a single forecast initialisation time (YYYYMMDDHH):
 python scripts/build_features.py --config config.yaml --init-time 2016050112 --lead-hours 6 12 18 24
-# Or process all initialisations for one or more years; add --compute-norm on first run:
-python scripts/build_features.py --config config.yaml --years 2016 2017 2018 --lead-hours 6 12 18 24 --compute-norm
+# Or process all initialisations for one or more years:
+python scripts/build_features.py --config config.yaml --years 2016 2017 2018 --lead-hours 6 12 18 24
+
+# 2b. Compute normalisation stats from the zarr store (run once after features are built)
+# Restrict to training init times with --start / --end (YYYYMMDDHH, both inclusive, both optional):
+python scripts/compute_norm_stats.py --config config.yaml --start 2016010100 --end 2021123118
 
 # 3. Train
 python scripts/train.py --config config.yaml

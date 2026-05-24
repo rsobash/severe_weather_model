@@ -13,7 +13,6 @@ import argparse
 import logging
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import zarr
 from omegaconf import OmegaConf
@@ -21,12 +20,10 @@ from tqdm import tqdm
 
 from severe_weather.features import (
     FEATURE_NAMES,
-    compute_norm_stats,
     extract_features,
     find_graphcast_file,
     list_graphcast_files,
     load_graphcast_file,
-    normalize,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -42,8 +39,6 @@ def parse_args():
     grp.add_argument("--years", nargs="+", type=int,
                      help="Process all initialisations for the given years")
     p.add_argument("--lead-hours", nargs="+", type=int, default=[6, 12, 18, 24])
-    p.add_argument("--compute-norm", action="store_true",
-                   help="Recompute normalisation stats from scratch")
     return p.parse_args()
 
 
@@ -56,8 +51,6 @@ def main():
 
     store_path = cfg.dataset.zarr_store
     root = zarr.open(store_path, mode="a")
-
-    all_features: list[np.ndarray] = []
 
     if args.init_time:
         try:
@@ -87,7 +80,6 @@ def main():
                     step = ds.isel(time=0)
 
                 feats = extract_features(step, cfg, lead_hour=lead_h)
-                all_features.append(feats)
 
                 init_ts = pd.Timestamp(ds.time.values.flat[0])
                 key = init_ts.strftime("%Y%m%d%H") + f"_f{lead_h:03d}"
@@ -104,13 +96,6 @@ def main():
     if FEATURE_NAMES:
         root.attrs["feature_names"] = FEATURE_NAMES
         log.info(f"Feature names ({len(FEATURE_NAMES)}): {FEATURE_NAMES}")
-
-    # Compute and save normalization stats
-    if args.compute_norm and all_features:
-        log.info("Computing normalisation stats …")
-        stats = compute_norm_stats(all_features)
-        np.savez(cfg.dataset.normalization_stats, **stats)
-        log.info(f"Saved norm stats → {cfg.dataset.normalization_stats}")
 
     log.info(f"Feature store → {store_path}")
 

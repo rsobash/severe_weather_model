@@ -197,19 +197,7 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> np.ndar
     FEATURE_NAMES = names
     return np.stack(channels, axis=0)  # (C, NY, NX)
 
-
-# ── Normalization stats ───────────────────────────────────────────────────────
-
-def compute_norm_stats(feature_arrays: list[np.ndarray]) -> dict[str, np.ndarray]:
-    """
-    Compute per-channel mean and std over a list of (C, H, W) arrays.
-    Call once on the training set; save with np.savez.
-    """
-    stacked = np.stack(feature_arrays, axis=0)  # (N, C, H, W)
-    mean = stacked.mean(axis=(0, 2, 3))          # (C,)
-    std  = stacked.std(axis=(0, 2, 3)) + 1e-8
-    return {"mean": mean.astype(np.float32), "std": std.astype(np.float32)}
-
+# ── Normalization ─────────────────────────────────────────────────────────────
 
 def normalize(features: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
     return ((features - mean[:, None, None]) / std[:, None, None]).astype(np.float32)
