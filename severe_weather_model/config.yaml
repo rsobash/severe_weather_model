@@ -1,0 +1,147 @@
+# ── Domain ──────────────────────────────────────────────────────────────────
+domain:
+  grid: "G211"   # G212 = 40km Lambert Conformal (185×129); G211 = 80km (93×65)
+
+# ── NWP Input (GraphCast) ────────────────────────────────────────────────────
+graphcast:
+  source: "local"                        # "gcs" | "local"
+  gcs_bucket: "dm-graphcast"
+  gcs_prefix: "dataset/source-era5_date"
+  local_dir: "data/raw/graphcast"
+  # Variables to extract (surface + pressure levels)
+  surface_vars:
+    - "10m_u_component_of_wind"
+    - "10m_v_component_of_wind"
+    - "mean_sea_level_pressure"
+    - "2m_temperature"
+    - "2m_dewpoint_temperature"
+    - "surface_pressure"
+    - "total_precipitation_6hr"
+    - "convective_available_potential_energy"   # not always available
+  pressure_levels: [925, 850, 700, 500, 300]
+  pressure_vars:
+    - "u_component_of_wind"
+    - "v_component_of_wind"
+    - "geopotential"
+    - "temperature"
+    - "specific_humidity"
+  # Derived features to compute from the above
+  derived_features:
+    - "wind_speed_10m"
+    - "wind_speed_850hPa"
+    - "bulk_shear_0_6km"          # magnitude of 10m - 500hPa wind vector diff
+    - "mslp_gradient"             # local gradient magnitude of MSLP
+    - "theta_e_850hPa"            # equivalent potential temperature
+    - "lapse_rate_700_500"        # 700-500 hPa temperature lapse rate
+
+# ── Labels (Severe Wind) ─────────────────────────────────────────────────────
+labels:
+  lsr_db: "../reports_v20260421.db"
+  wind_gust_threshold_kts: 50     # 50 kt = 25.7 m/s = ~58 mph (SPC severe threshold)
+  hail_size_threshold_in: 1.00   # quarter size; significant hail threshold
+  tornado_ef_threshold: 0        # EF0+ — all tornadoes
+  radius_km: 40                   # grid point is positive if any report falls within this radius
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+dataset:
+  zarr_store: "data/processed/severe_labels.zarr"
+  train_years: [2016, 2017, 2018, 2019, 2020, 2021]
+  val_years: [2022]
+  test_years: [2023]
+  # Only include samples with at least one positive cell (avoids all-zero batches)
+  positive_only_ratio: 0.5        # 50% of batches guaranteed to have a positive
+  normalization_stats: "data/processed/norm_stats.npz"
+  # Optional: restrict training to a subset of extracted features.
+  # Names must match those stored in the zarr attrs (feature_names).
+  # Leave empty (or omit) to use all features.
+  feature_names:
+    # Surface
+    - u10
+    - v10
+    - wspd10
+    - mslp
+    - mslp_grad
+    - cape
+    # Pressure levels (925/850/700/500/300 hPa)
+    - u_component_of_wind_925hPa
+    - u_component_of_wind_850hPa
+    - u_component_of_wind_700hPa
+    - u_component_of_wind_500hPa
+    - u_component_of_wind_300hPa
+    - v_component_of_wind_925hPa
+    - v_component_of_wind_850hPa
+    - v_component_of_wind_700hPa
+    - v_component_of_wind_500hPa
+    - v_component_of_wind_300hPa
+    - geopotential_925hPa
+    - geopotential_850hPa
+    - geopotential_700hPa
+    - geopotential_500hPa
+    - geopotential_300hPa
+    - temperature_925hPa
+    - temperature_850hPa
+    - temperature_700hPa
+    - temperature_500hPa
+    - temperature_300hPa
+    - specific_humidity_925hPa
+    - specific_humidity_850hPa
+    - specific_humidity_700hPa
+    - specific_humidity_500hPa
+    - specific_humidity_300hPa
+    # Derived multi-level
+    - bulk_shear_0_6km
+    - wspd850
+    - theta_e_850
+    - lapse_700_500
+    # Temporal encoding
+    - lead_norm
+    - doy_sin
+    - doy_cos
+    - hod_sin
+    - hod_cos
+    # Static grid
+    - lat
+    - lon
+
+# ── Model ────────────────────────────────────────────────────────────────────
+model:
+  architecture: "unet"
+  encoder: "resnet34"             # resnet18 | resnet34 | efficientnet-b2
+  encoder_weights: null           # null = random init; "imagenet" = pretrained
+  in_channels: 32                 # set automatically by feature_engineering.py
+  hazard_channels: [0, 1, 2, 3]  # 0=wind 1=hail 2=tornado 3=any; subset e.g. [2] for tornado only
+  decoder_channels: [256, 128, 64, 32, 16]
+  dropout: 0.2
+
+# ── Loss ─────────────────────────────────────────────────────────────────────
+loss:
+  type: "focal"                   # "focal" | "bce_weighted"
+  focal_alpha: 0.75               # weight for positive class
+  focal_gamma: 2.0
+  bce_pos_weight: 15.0            # used only if type=bce_weighted
+
+# ── Training ─────────────────────────────────────────────────────────────────
+training:
+  batch_size: 16
+  num_workers: 4
+  max_epochs: 100
+  early_stopping_patience: 10
+  optimizer: "adamw"
+  lr: 1e-4
+  weight_decay: 1e-5
+  scheduler: "cosine"             # "cosine" | "plateau"
+  warmup_epochs: 3
+  amp: true                       # automatic mixed precision
+  grad_clip: 1.0
+  checkpoint_dir: "models/checkpoints"
+  log_dir: "logs"
+
+# ── Calibration ──────────────────────────────────────────────────────────────
+calibration:
+  method: "temperature_scaling"
+  calibration_dir: "models/calibration"
+
+# ── Evaluation ───────────────────────────────────────────────────────────────
+evaluation:
+  prob_thresholds: [0.05, 0.10, 0.15, 0.25, 0.45]  # matches SPC marginal/slight/enhanced/moderate/high
+  output_dir: "logs/eval"

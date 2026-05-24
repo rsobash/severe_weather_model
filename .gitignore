@@ -1,0 +1,28 @@
+# Data files
+*.db
+*.nc
+data/
+
+# Zarr stores
+*.zarr/
+
+# Model outputs
+models/checkpoints/
+logs/
+
+# Norm stats
+*.npz
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Plots / images
+*.png
+
+# Misc
+.DS_Store
