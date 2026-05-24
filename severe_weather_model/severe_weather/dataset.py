@@ -110,10 +110,11 @@ class SevereWindDataset(Dataset):
 def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, DataLoader]:
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
+    lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
     train_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
         years=cfg.dataset.train_years,
-        lead_hours=list(range(6, 49, 6)),
+        lead_hours=lead_hours,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=cfg.dataset.positive_only_ratio,
         feature_names=feature_names,
@@ -122,7 +123,7 @@ def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, Data
     val_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
         years=cfg.dataset.val_years,
-        lead_hours=list(range(6, 49, 6)),
+        lead_hours=lead_hours,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=0.0,
         feature_names=feature_names,

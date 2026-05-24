@@ -1,6 +1,8 @@
 """
 Build the feature zarr store from raw GraphCast output.
 
+Lead-time range is controlled by graphcast.lead_start / lead_end / lead_interval in config.yaml.
+
 Usage:
     # Single init time
     python scripts/build_features.py --config config.yaml --init-time 2016050112
@@ -13,6 +15,7 @@ import argparse
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import zarr
 from omegaconf import OmegaConf
@@ -38,7 +41,6 @@ def parse_args():
                      help="Process a single forecast initialisation time")
     grp.add_argument("--years", nargs="+", type=int,
                      help="Process all initialisations for the given years")
-    p.add_argument("--lead-hours", nargs="+", type=int, default=[6, 12, 18, 24])
     return p.parse_args()
 
 
@@ -51,6 +53,8 @@ def main():
 
     store_path = cfg.dataset.zarr_store
     root = zarr.open(store_path, mode="a")
+
+    lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
 
     if args.init_time:
         try:
@@ -72,7 +76,7 @@ def main():
             log.warning(f"Failed to load {fpath}: {e}")
             continue
 
-        for lead_h in args.lead_hours:
+        for lead_h in lead_hours:
             try:
                 if "prediction_timedelta" in ds.dims:
                     step = ds.sel(prediction_timedelta=np.timedelta64(lead_h, "h"))
