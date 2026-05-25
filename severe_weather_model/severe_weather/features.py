@@ -95,19 +95,15 @@ def _lapse_rate(t700: np.ndarray, t500: np.ndarray) -> np.ndarray:
 
 # ── Main feature extraction ───────────────────────────────────────────────────
 
-FEATURE_NAMES: list[str] = []  # populated by extract_features
-
-
-def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> np.ndarray:
+def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> tuple[np.ndarray, list[str]]:
     """
     Extract and regrid all features from one GraphCast xr.Dataset snapshot.
 
-    Returns array of shape (C, NY, NX) and updates FEATURE_NAMES.
+    Returns (array of shape (C, NY, NX), list of feature names).
     """
-    global FEATURE_NAMES
     grid_name = cfg.domain.grid
-    lats = ds.latitude.values
-    lons = ds.longitude.values
+    lats = ds.lat.values
+    lons = ds.lon.values
     channels: list[np.ndarray] = []
     names: list[str] = []
 
@@ -180,8 +176,7 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> np.ndar
     channels += [lead_norm, doy_sin, doy_cos, hod_sin, hod_cos, grid_lats, grid_lons]
     names += ["lead_norm", "doy_sin", "doy_cos", "hod_sin", "hod_cos", "lat", "lon"]
 
-    FEATURE_NAMES = names
-    return np.stack(channels, axis=0)  # (C, NY, NX)
+    return np.stack(channels, axis=0), names  # (C, NY, NX)
 
 # ── Normalization ─────────────────────────────────────────────────────────────
 

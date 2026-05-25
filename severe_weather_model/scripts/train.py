@@ -17,7 +17,6 @@ from omegaconf import OmegaConf
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from severe_weather.dataset import make_dataloaders
-from severe_weather.features import FEATURE_NAMES
 from severe_weather.model import build_loss, build_model
 from severe_weather.train import train
 

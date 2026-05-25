@@ -24,7 +24,6 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from severe_weather.features import (
-    FEATURE_NAMES,
     extract_features,
     load_graphcast_file,
 )
@@ -65,6 +64,7 @@ def main():
 
     log.info(f"Processing {len(init_times)} init time(s), {len(lead_hours)} lead hour(s) each")
 
+    feature_names: list[str] = []
     for init_str in tqdm(init_times, desc="inits"):
         for lead_h in lead_hours:
             fpath = local_dir / f"weathernext_{init_str}_{lead_h:03d}_mean.nc"
@@ -74,7 +74,9 @@ def main():
             try:
                 ds = load_graphcast_file(fpath)
                 step = ds.isel(prediction_timedelta=0) if "prediction_timedelta" in ds.dims else ds.isel(time=0)
-                feats = extract_features(step, cfg, lead_hour=lead_h)
+                feats, names = extract_features(step, cfg, lead_hour=lead_h)
+                if not feature_names:
+                    feature_names = names
 
                 feat_key = f"features/{init_str}_f{lead_h:03d}"
                 if feat_key not in root:
@@ -84,10 +86,9 @@ def main():
             except Exception as e:
                 log.warning(f"  {fpath.name} error: {e}")
 
-    # Save feature names
-    if FEATURE_NAMES:
-        root.attrs["feature_names"] = FEATURE_NAMES
-        log.info(f"Feature names ({len(FEATURE_NAMES)}): {FEATURE_NAMES}")
+    if feature_names:
+        root.attrs["feature_names"] = feature_names
+        log.info(f"Feature names ({len(feature_names)}): {feature_names}")
 
     log.info(f"Feature store → {store_path}")
 
