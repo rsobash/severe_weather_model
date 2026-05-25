@@ -1,14 +1,16 @@
 """
 Build the feature zarr store from raw GraphCast output.
 
+Expected filename format: weathernext_YYYYMMDDHH_FHR_mean.nc
+Init times are enumerated at 24-hourly frequency between --start and --end.
 Lead-time range is controlled by graphcast.lead_start / lead_end / lead_interval in config.yaml.
 
 Usage:
-    # All initialisations in the local_dir
-    python scripts/build_features.py --config config.yaml
+    # Single init time
+    python scripts/build_features.py --config config.yaml --start 2024050100
 
-    # Restrict to a range of init times (YYYYMMDDHH, both inclusive, both optional)
-    python scripts/build_features.py --config config.yaml --start 2016010100 --end 2021123118
+    # Range of init times (24-hourly, both inclusive)
+    python scripts/build_features.py --config config.yaml --start 2016010100 --end 2021123100
 """
 
 import argparse
@@ -34,10 +36,10 @@ log = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
-    p.add_argument("--start", metavar="YYYYMMDDHH",
-                   help="Earliest init time to include (inclusive)")
+    p.add_argument("--start", required=True, metavar="YYYYMMDDHH",
+                   help="First init time to process (inclusive)")
     p.add_argument("--end", metavar="YYYYMMDDHH",
-                   help="Latest init time to include (inclusive)")
+                   help="Last init time to process (inclusive); defaults to --start")
     return p.parse_args()
 
 
@@ -52,47 +54,35 @@ def main():
     root = zarr.open(store_path, mode="a")
 
     lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
-
     local_dir = Path(cfg.graphcast.local_dir)
-    files = sorted(local_dir.glob("*.nc"))
 
-    if args.start or args.end:
-        lo = args.start or "0000000000"
-        hi = args.end   or "9999999999"
-        files = [f for f in files if lo <= f.name[:10] <= hi]
+    end = args.end or args.start
+    init_times = pd.date_range(
+        pd.to_datetime(args.start, format="%Y%m%d%H"),
+        pd.to_datetime(end, format="%Y%m%d%H"),
+        freq="24h",
+    ).strftime("%Y%m%d%H").tolist()
 
-    if not files:
-        log.error("No GraphCast files matched the requested range.")
-        return
+    log.info(f"Processing {len(init_times)} init time(s), {len(lead_hours)} lead hour(s) each")
 
-    log.info(f"Processing {len(files)} init times")
-
-    for fpath in tqdm(files, desc="inits"):
-        try:
-            ds = load_graphcast_file(fpath)
-        except Exception as e:
-            log.warning(f"Failed to load {fpath}: {e}")
-            continue
-
+    for init_str in tqdm(init_times, desc="inits"):
         for lead_h in lead_hours:
+            fpath = local_dir / f"weathernext_{init_str}_{lead_h:03d}_mean.nc"
+            if not fpath.exists():
+                log.warning(f"Missing {fpath.name}, skipping")
+                continue
             try:
-                if "prediction_timedelta" in ds.dims:
-                    step = ds.sel(prediction_timedelta=np.timedelta64(lead_h, "h"))
-                else:
-                    step = ds.isel(time=0)
-
+                ds = load_graphcast_file(fpath)
+                step = ds.isel(prediction_timedelta=0) if "prediction_timedelta" in ds.dims else ds.isel(time=0)
                 feats = extract_features(step, cfg, lead_hour=lead_h)
 
-                init_ts = pd.Timestamp(ds.time.values.flat[0])
-                key = init_ts.strftime("%Y%m%d%H") + f"_f{lead_h:03d}"
-
-                feat_key = f"features/{key}"
+                feat_key = f"features/{init_str}_f{lead_h:03d}"
                 if feat_key not in root:
                     root.create_array(feat_key, shape=feats.shape, dtype="float32", chunks=(feats.shape[0], 32, 32))
                 root[feat_key][:] = feats
 
             except Exception as e:
-                log.warning(f"  lead={lead_h}h error: {e}")
+                log.warning(f"  {fpath.name} error: {e}")
 
     # Save feature names
     if FEATURE_NAMES:
