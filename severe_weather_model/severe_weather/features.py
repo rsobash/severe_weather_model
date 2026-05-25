@@ -21,20 +21,6 @@ log = logging.getLogger(__name__)
 
 # ── Local file helpers ───────────────────────────────────────────────────────
 
-def list_graphcast_files(cfg: DictConfig, year: int) -> list[Path]:
-    """Return local paths for all GraphCast files in a given year."""
-    local_dir = Path(cfg.graphcast.local_dir)
-    return sorted(local_dir.glob(f"{year}*.nc"))
-
-
-def find_graphcast_file(cfg: DictConfig, init_time: str) -> Path:
-    """Return the local path for a single GraphCast file by init time (YYYYMMDDHH)."""
-    local_dir = Path(cfg.graphcast.local_dir)
-    matches = sorted(local_dir.glob(f"{init_time}*.nc"))
-    if not matches:
-        raise FileNotFoundError(f"No GraphCast file found for init time {init_time} in {local_dir}")
-    return matches[0]
-
 
 def load_graphcast_file(path: str | Path) -> xr.Dataset:
     """Open a single GraphCast NetCDF file from disk."""

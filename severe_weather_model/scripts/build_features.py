@@ -4,11 +4,11 @@ Build the feature zarr store from raw GraphCast output.
 Lead-time range is controlled by graphcast.lead_start / lead_end / lead_interval in config.yaml.
 
 Usage:
-    # Single init time
-    python scripts/build_features.py --config config.yaml --init-time 2016050112
+    # All initialisations in the local_dir
+    python scripts/build_features.py --config config.yaml
 
-    # All initialisations for one or more years
-    python scripts/build_features.py --config config.yaml --years 2016 2017 2018
+    # Restrict to a range of init times (YYYYMMDDHH, both inclusive, both optional)
+    python scripts/build_features.py --config config.yaml --start 2016010100 --end 2021123118
 """
 
 import argparse
@@ -24,8 +24,6 @@ from tqdm import tqdm
 from severe_weather.features import (
     FEATURE_NAMES,
     extract_features,
-    find_graphcast_file,
-    list_graphcast_files,
     load_graphcast_file,
 )
 
@@ -36,11 +34,10 @@ log = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
-    grp = p.add_mutually_exclusive_group(required=True)
-    grp.add_argument("--init-time", metavar="YYYYMMDDHH",
-                     help="Process a single forecast initialisation time")
-    grp.add_argument("--years", nargs="+", type=int,
-                     help="Process all initialisations for the given years")
+    p.add_argument("--start", metavar="YYYYMMDDHH",
+                   help="Earliest init time to include (inclusive)")
+    p.add_argument("--end", metavar="YYYYMMDDHH",
+                   help="Latest init time to include (inclusive)")
     return p.parse_args()
 
 
@@ -56,18 +53,19 @@ def main():
 
     lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
 
-    if args.init_time:
-        try:
-            files = [find_graphcast_file(cfg, args.init_time)]
-        except FileNotFoundError as e:
-            log.error(e)
-            return
-        log.info(f"Processing single init time {args.init_time}")
-    else:
-        files = []
-        for year in args.years:
-            log.info(f"Collecting files for year {year}")
-            files.extend(list_graphcast_files(cfg, year))
+    local_dir = Path(cfg.graphcast.local_dir)
+    files = sorted(local_dir.glob("*.nc"))
+
+    if args.start or args.end:
+        lo = args.start or "0000000000"
+        hi = args.end   or "9999999999"
+        files = [f for f in files if lo <= f.name[:10] <= hi]
+
+    if not files:
+        log.error("No GraphCast files matched the requested range.")
+        return
+
+    log.info(f"Processing {len(files)} init times")
 
     for fpath in tqdm(files, desc="inits"):
         try:

@@ -15,10 +15,8 @@ python scripts/build_labels.py --config config.yaml --years 2016 2017 2018 2019 
 
 # 2a. Build feature zarr store from GraphCast NetCDF files
 # Lead-time range is set in config.yaml (graphcast.lead_start / lead_end / lead_interval)
-# Process a single forecast initialisation time (YYYYMMDDHH):
-python scripts/build_features.py --config config.yaml --init-time 2016050112
-# Or process all initialisations for one or more years:
-python scripts/build_features.py --config config.yaml --years 2016 2017 2018
+# Restrict to a range of init times with --start / --end (YYYYMMDDHH, both inclusive, both optional):
+python scripts/build_features.py --config config.yaml --start 2016010100 --end 2021123118
 
 # 2b. Compute normalisation stats from the zarr store (run once after features are built)
 # Restrict to training init times with --start / --end (YYYYMMDDHH, both inclusive, both optional):
