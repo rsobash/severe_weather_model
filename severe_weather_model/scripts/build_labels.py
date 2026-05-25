@@ -1,18 +1,20 @@
 """
 Build the label zarr store from SPC LSR archive.
 
+Labels are keyed by convective day start (noon UTC), so --start / --end are
+interpreted as YYYYMMDD; the 12Z time is added automatically.
+
 Usage:
-    python scripts/build_labels.py --config config.yaml --years 2016 2017 2018
+    python scripts/build_labels.py --config config.yaml --start 20160101 --end 20231231
 """
 
 import argparse
 import logging
-from datetime import datetime, timedelta
 from pathlib import Path
 
+import pandas as pd
 import zarr
 from omegaconf import OmegaConf
-from tqdm import tqdm
 
 from severe_weather.labels import build_label_store
 
@@ -23,9 +25,10 @@ log = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
-    p.add_argument("--years", nargs="+", type=int, required=True)
-    p.add_argument("--hour-step", type=int, default=24,
-                   help="Generate one label grid every N hours")
+    p.add_argument("--start", required=True, metavar="YYYYMMDD",
+                   help="First convective day to process (inclusive)")
+    p.add_argument("--end", metavar="YYYYMMDD",
+                   help="Last convective day to process (inclusive); defaults to --start")
     return p.parse_args()
 
 
@@ -35,17 +38,16 @@ def main():
 
     root = zarr.open(cfg.dataset.zarr_store, mode="a")
 
-    for year in args.years:
-        log.info(f"Building labels for {year}")
-        t = datetime(year, 1, 1, 12, 0)  # noon start so ±12h spans exactly one UTC calendar day
-        valid_times = []
-        while t.year == year:
-            valid_times.append(t)
-            t += timedelta(hours=args.hour_step)
+    end = args.end or args.start
+    dates = pd.date_range(
+        pd.to_datetime(args.start, format="%Y%m%d"),
+        pd.to_datetime(end, format="%Y%m%d"),
+        freq="D",
+    )
+    valid_times = [d.to_pydatetime().replace(hour=12) for d in dates]
 
-        build_label_store(valid_times, cfg, root)
-        log.info(f"  {len(valid_times)} time steps written")
-
+    log.info(f"Building labels for {len(valid_times)} convective day(s)")
+    build_label_store(valid_times, cfg, root)
     log.info(f"Label store → {cfg.dataset.zarr_store}")
 
 

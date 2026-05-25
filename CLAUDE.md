@@ -11,7 +11,8 @@ All scripts are run from `severe_weather_model/` with `config.yaml` in the worki
 pip install -e severe_weather_model/
 
 # 1. Build label grids from SPC LSR SQLite archive
-python scripts/build_labels.py --config config.yaml --years 2016 2017 2018 2019 2020 2021 2022 2023
+# --start / --end are YYYYMMDD (date only; 12Z is added automatically), both inclusive:
+python scripts/build_labels.py --config config.yaml --start 20160101 --end 20231231
 
 # 2a. Build feature zarr store from GraphCast NetCDF files
 # Lead-time range is set in config.yaml (graphcast.lead_start / lead_end / lead_interval)

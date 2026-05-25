@@ -19,7 +19,7 @@ graphcast:
     - "total_precipitation_6hr"
     - "convective_available_potential_energy"   # not always available
   lead_start: 6        # first lead hour to process
-  lead_end: 48         # last lead hour to process (inclusive)
+  lead_end: 96         # last lead hour to process (inclusive)
   lead_interval: 6     # step between lead hours
   pressure_levels: [925, 850, 700, 500, 300]
   pressure_vars:
