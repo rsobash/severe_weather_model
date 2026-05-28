@@ -2,8 +2,14 @@
 Main training entry point.
 
 Usage:
-    python scripts/train.py --config config.yaml
-    python scripts/train.py --config config.yaml training.lr=5e-5 model.encoder=resnet18
+    python scripts/train.py --config config.yaml \\
+        --train-start 2016010100 --train-end 2021123118 \\
+        --val-start 2022010100 --val-end 2022123118
+    # Override any config key via OmegaConf dotlist:
+    python scripts/train.py --config config.yaml \\
+        --train-start 2016010100 --train-end 2021123118 \\
+        --val-start 2022010100 --val-end 2022123118 \\
+        training.lr=5e-5 model.encoder=resnet18
 """
 
 import argparse
@@ -27,6 +33,14 @@ log = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
+    p.add_argument("--train-start", required=True, metavar="YYYYMMDDHH",
+                   help="First init time for training (inclusive)")
+    p.add_argument("--train-end", required=True, metavar="YYYYMMDDHH",
+                   help="Last init time for training (inclusive)")
+    p.add_argument("--val-start", required=True, metavar="YYYYMMDDHH",
+                   help="First init time for validation (inclusive)")
+    p.add_argument("--val-end", required=True, metavar="YYYYMMDDHH",
+                   help="Last init time for validation (inclusive)")
     p.add_argument("overrides", nargs="*", help="OmegaConf dot-path overrides, e.g. training.lr=1e-4")
     return p.parse_args()
 
@@ -44,12 +58,16 @@ def main():
     if not Path(norm_stats).exists():
         log.error(
             f"Normalisation stats not found at {norm_stats}. "
-            "Run: python scripts/build_features.py --compute-norm"
+            "Run: python scripts/compute_norm_stats.py"
         )
         sys.exit(1)
 
     log.info("Building dataloaders …")
-    train_dl, val_dl = make_dataloaders(cfg, norm_stats)
+    train_dl, val_dl = make_dataloaders(
+        cfg, norm_stats,
+        train_start=args.train_start, train_end=args.train_end,
+        val_start=args.val_start, val_end=args.val_end,
+    )
     log.info(f"  train={len(train_dl.dataset)} val={len(val_dl.dataset)} samples")
 
     # Infer in_channels from the first batch
@@ -67,7 +85,6 @@ def main():
     log.info("Training …")
     model = train(model, loss_fn, train_dl, val_dl, cfg, device)
 
-    # Save final model alongside checkpoints
     final_path = Path(cfg.training.checkpoint_dir) / "final.pt"
     torch.save(model.state_dict(), final_path)
     log.info(f"Final model saved → {final_path}")

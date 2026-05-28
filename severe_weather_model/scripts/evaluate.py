@@ -2,7 +2,9 @@
 Calibrate and evaluate a trained model on the test set.
 
 Usage:
-    python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt
+    python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt \\
+        --val-start 2022010100 --val-end 2022123118 \\
+        --test-start 2023010100 --test-end 2023123118
 """
 
 import argparse
@@ -35,6 +37,14 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
     p.add_argument("--checkpoint", required=True)
+    p.add_argument("--val-start", required=True, metavar="YYYYMMDDHH",
+                   help="First init time for validation / calibration (inclusive)")
+    p.add_argument("--val-end", required=True, metavar="YYYYMMDDHH",
+                   help="Last init time for validation / calibration (inclusive)")
+    p.add_argument("--test-start", required=True, metavar="YYYYMMDDHH",
+                   help="First init time for evaluation (inclusive)")
+    p.add_argument("--test-end", required=True, metavar="YYYYMMDDHH",
+                   help="Last init time for evaluation (inclusive)")
     p.add_argument("--skip-calibration", action="store_true")
     return p.parse_args()
 
@@ -53,10 +63,12 @@ def main():
     # ── Load model ────────────────────────────────────────────────────────────
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
+    forecast_days = list(cfg.graphcast.forecast_days)
     val_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
-        years=cfg.dataset.val_years,
-        lead_hours=list(range(6, 49, 6)),
+        start=args.val_start,
+        end=args.val_end,
+        forecast_days=forecast_days,
         norm_stats_path=norm_stats,
         positive_oversample_ratio=0.0,
         feature_names=feature_names,
@@ -64,8 +76,9 @@ def main():
     )
     test_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
-        years=cfg.dataset.test_years,
-        lead_hours=list(range(6, 49, 6)),
+        start=args.test_start,
+        end=args.test_end,
+        forecast_days=forecast_days,
         norm_stats_path=norm_stats,
         positive_oversample_ratio=0.0,
         feature_names=feature_names,

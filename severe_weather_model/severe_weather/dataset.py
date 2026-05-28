@@ -26,7 +26,8 @@ class SevereWindDataset(Dataset):
     def __init__(
         self,
         zarr_store: str | Path,
-        years: list[int],
+        start: str,                   # YYYYMMDDHH, inclusive
+        end: str,                     # YYYYMMDDHH, inclusive
         forecast_days: list[int],
         norm_stats_path: str | Path,
         positive_oversample_ratio: float = 0.5,
@@ -52,6 +53,9 @@ class SevereWindDataset(Dataset):
         else:
             self._feat_idx = None
 
+        start_dt = datetime.strptime(start, "%Y%m%d%H")
+        end_dt = datetime.strptime(end, "%Y%m%d%H")
+
         # Day N → leads (N-1)*24 + [12, 18, 24, 30]
         forecast_periods = [
             [(day - 1) * 24 + 12 + i * 6 for i in range(4)]
@@ -62,7 +66,7 @@ class SevereWindDataset(Dataset):
         feat_set = set(all_feature_keys)
         self.samples: list[tuple[list[str], str]] = []  # (feat_keys, label_key)
 
-        # Collect unique 00Z init dates within requested years
+        # Collect unique 00Z init dates within [start_dt, end_dt]
         init_dates: set[str] = set()
         for fk in all_feature_keys:
             try:
@@ -71,7 +75,8 @@ class SevereWindDataset(Dataset):
                 continue
             if date_part[-2:] != "00":
                 continue
-            if int(date_part[:4]) not in years:
+            init_dt = datetime.strptime(date_part, "%Y%m%d%H")
+            if not (start_dt <= init_dt <= end_dt):
                 continue
             init_dates.add(date_part)
 
@@ -127,13 +132,22 @@ class SevereWindDataset(Dataset):
         )
 
 
-def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, DataLoader]:
+def make_dataloaders(
+    cfg,
+    norm_stats_path: str | Path,
+    train_start: str,
+    train_end: str,
+    val_start: str,
+    val_end: str,
+) -> tuple[DataLoader, DataLoader]:
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
     forecast_days = list(cfg.graphcast.forecast_days)
+
     train_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
-        years=cfg.dataset.train_years,
+        start=train_start,
+        end=train_end,
         forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=cfg.dataset.positive_only_ratio,
@@ -142,7 +156,8 @@ def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, Data
     )
     val_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
-        years=cfg.dataset.val_years,
+        start=val_start,
+        end=val_end,
         forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=0.0,
