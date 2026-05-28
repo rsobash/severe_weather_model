@@ -24,13 +24,25 @@ python scripts/build_features.py --config config.yaml --start 2016010100 --end 2
 python scripts/compute_norm_stats.py --config config.yaml --start 2016010100 --end 2021123118
 
 # 3. Train
-python scripts/train.py --config config.yaml
+# --train-start/--train-end and --val-start/--val-end are YYYYMMDDHH, both inclusive:
+python scripts/train.py --config config.yaml \
+    --train-start 2016010100 --train-end 2021123118 \
+    --val-start 2022010100 --val-end 2022123118
 # Override any config key via OmegaConf dotlist, e.g.:
-python scripts/train.py --config config.yaml training.lr=5e-5 model.encoder=resnet18
+python scripts/train.py --config config.yaml \
+    --train-start 2016010100 --train-end 2021123118 \
+    --val-start 2022010100 --val-end 2022123118 \
+    training.lr=5e-5 model.encoder=resnet18
 
 # 4. Evaluate (calibrate + metrics + reliability diagram)
-python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt
-python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt --skip-calibration
+# --val-start/--val-end used for temperature scaling; --test-start/--test-end for metrics:
+python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt \
+    --val-start 2022010100 --val-end 2022123118 \
+    --test-start 2023010100 --test-end 2023123118
+python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/best.pt \
+    --val-start 2022010100 --val-end 2022123118 \
+    --test-start 2023010100 --test-end 2023123118 \
+    --skip-calibration
 ```
 
 ## Architecture
@@ -54,7 +66,7 @@ Switching grids requires rebuilding the zarr store.
 - `dataset.feature_names` in `config.yaml` controls which extracted channels are passed to the model. Names must match those in `zarr_store.attrs["feature_names"]`. Leave the list empty to use all channels. Both training and evaluation read this key. Adding or removing features requires rebuilding the zarr store only if the new features were never extracted; otherwise it's a config-only change.
 
 **Training:**
-- `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS).
+- `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. Init times are filtered by explicit `start`/`end` YYYYMMDDHH args (no year-list filtering). The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS).
 - `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt`.
 
 **Calibration and evaluation:**
