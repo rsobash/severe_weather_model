@@ -54,7 +54,7 @@ Switching grids requires rebuilding the zarr store.
 - `dataset.feature_names` in `config.yaml` controls which extracted channels are passed to the model. Names must match those in `zarr_store.attrs["feature_names"]`. Leave the list empty to use all channels. Both training and evaluation read this key. Adding or removing features requires rebuilding the zarr store only if the new features were never extracted; otherwise it's a config-only change.
 
 **Training:**
-- `severe_weather/dataset.py` — `SevereWindDataset` reads from zarr, slices to the configured feature subset (if any), normalises features per-channel, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS).
+- `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS).
 - `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt`.
 
 **Calibration and evaluation:**
@@ -62,5 +62,7 @@ Switching grids requires rebuilding the zarr store.
 
 **Config:**
 - `config.yaml` uses OmegaConf. All paths are relative to the `severe_weather_model/` working directory. Any key can be overridden on the command line via dotlist syntax when calling `scripts/train.py`.
+- `graphcast.lead_start / lead_end / lead_interval` — used only by `build_features.py` to control which lead files are processed into the zarr store.
+- `graphcast.forecast_days` — list of forecast day indices (e.g. `[1, 2, 3, 4]`) used by the dataset at training time. Extending this list (e.g. to Day 7) requires no zarr rebuild as long as the corresponding lead files were already extracted.
 
 **Key data dependency order:** LSR SQLite DB → `build_labels.py` → zarr labels; GraphCast NetCDF files → `build_features.py` (with `--compute-norm` on first run) → zarr features + `data/processed/norm_stats.npz`; both must exist before training. Adding a new feature to `features.py` (e.g. `lat`/`lon`) or switching grids requires rebuilding the zarr store and recomputing norm stats before training. Changing label thresholds (`wind_gust_threshold_kts`, `hail_size_threshold_in`, `tornado_ef_threshold`) or `radius_km` requires rebuilding the zarr labels.
