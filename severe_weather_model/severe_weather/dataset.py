@@ -5,6 +5,7 @@ PyTorch Dataset that reads matched (features, labels) pairs from the zarr store.
 from __future__ import annotations
 
 import random
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -16,16 +17,17 @@ from .features import normalize
 
 class SevereWindDataset(Dataset):
     """
-    Each sample is one NWP valid time at one lead hour:
-      features : float32 tensor (C, NY, NX)  — normalised NWP fields
-      label    : float32 tensor (1, NY, NX)  — 0/1 per grid cell
+    Each sample is one convective day from one 00Z NWP init, covering 4 consecutive
+    6-hourly leads stacked along the channel axis:
+      features : float32 tensor (4*C, NY, NX)  — normalised NWP fields
+      label    : float32 tensor (C_out, NY, NX) — 0/1 per grid cell
     """
 
     def __init__(
         self,
         zarr_store: str | Path,
         years: list[int],
-        lead_hours: list[int],
+        forecast_days: list[int],
         norm_stats_path: str | Path,
         positive_oversample_ratio: float = 0.5,
         feature_names: list[str] | None = None,
@@ -50,30 +52,46 @@ class SevereWindDataset(Dataset):
         else:
             self._feat_idx = None
 
-        # Build index of keys present in the store for the requested years/leads
-        all_feature_keys = list(self.root["features"].keys())
-        self.samples: list[tuple[str, str]] = []  # (feature_key, label_key)
+        # Day N → leads (N-1)*24 + [12, 18, 24, 30]
+        forecast_periods = [
+            [(day - 1) * 24 + 12 + i * 6 for i in range(4)]
+            for day in forecast_days
+        ]
 
+        all_feature_keys = list(self.root["features"].keys())
+        feat_set = set(all_feature_keys)
+        self.samples: list[tuple[list[str], str]] = []  # (feat_keys, label_key)
+
+        # Collect unique 00Z init dates within requested years
+        init_dates: set[str] = set()
         for fk in all_feature_keys:
-            # key format: YYYYMMDDHH_f{lead:03d}
             try:
-                date_part, lead_part = fk.split("_f")
-                year = int(date_part[:4])
-                lead = int(lead_part)
+                date_part, _ = fk.split("_f")
             except ValueError:
                 continue
-            if year not in years or lead not in lead_hours:
+            if date_part[-2:] != "00":
                 continue
-            label_key = date_part  # YYYYMMDDHH
-            if label_key in self.root.get("labels", {}):
-                self.samples.append((fk, label_key))
+            if int(date_part[:4]) not in years:
+                continue
+            init_dates.add(date_part)
+
+        label_keys = set(self.root.get("labels", {}).keys())
+        for date_part in sorted(init_dates):
+            init_dt = datetime.strptime(date_part, "%Y%m%d%H")
+            for period_leads in forecast_periods:
+                feat_keys = [f"{date_part}_f{lead:03d}" for lead in period_leads]
+                if not all(k in feat_set for k in feat_keys):
+                    continue
+                label_dt = init_dt + timedelta(hours=period_leads[0])
+                label_key = label_dt.strftime("%Y%m%d%H")
+                if label_key in label_keys:
+                    self.samples.append((feat_keys, label_key))
 
         # Partition into positive and negative samples for oversampling
         self._pos_idx: list[int] = []
         self._neg_idx: list[int] = []
-        for i, (fk, lk) in enumerate(self.samples):
-            label = self.root["labels"][lk][:]
-            if label.max() > 0:
+        for i, (_, lk) in enumerate(self.samples):
+            if self.root["labels"][lk][:].max() > 0:
                 self._pos_idx.append(i)
             else:
                 self._neg_idx.append(i)
@@ -85,20 +103,23 @@ class SevereWindDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # Oversample positives: with probability _pos_ratio, pick from positive pool
         if self._pos_idx and random.random() < self._pos_ratio:
             idx = random.choice(self._pos_idx)
 
-        fk, lk = self.samples[idx]
-        features = self.root["features"][fk][:]          # (C, H, W)
-        if self._feat_idx is not None:
-            features = features[self._feat_idx]
+        feat_keys, lk = self.samples[idx]
+        stacked = []
+        for fk in feat_keys:
+            arr = self.root["features"][fk][:]        # (C, H, W)
+            if self._feat_idx is not None:
+                arr = arr[self._feat_idx]             # (C_sel, H, W)
+            arr = normalize(arr, self.mean, self.std)
+            stacked.append(arr)
+        features = np.concatenate(stacked, axis=0)   # (4*C_sel, H, W)
+
         label = self.root["labels"][lk][:]               # (3, H, W)
         any_ch = label.max(axis=0, keepdims=True)        # (1, H, W)
         label = np.concatenate([label, any_ch], axis=0)  # (4, H, W)
         label = label[self._hazard_channels]              # (C_out, H, W)
-
-        features = normalize(features, self.mean, self.std)
 
         return (
             torch.from_numpy(features),
@@ -106,15 +127,14 @@ class SevereWindDataset(Dataset):
         )
 
 
-
 def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, DataLoader]:
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
-    lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
+    forecast_days = list(cfg.graphcast.forecast_days)
     train_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
         years=cfg.dataset.train_years,
-        lead_hours=lead_hours,
+        forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=cfg.dataset.positive_only_ratio,
         feature_names=feature_names,
@@ -123,7 +143,7 @@ def make_dataloaders(cfg, norm_stats_path: str | Path) -> tuple[DataLoader, Data
     val_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
         years=cfg.dataset.val_years,
-        lead_hours=lead_hours,
+        forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
         positive_oversample_ratio=0.0,
         feature_names=feature_names,
