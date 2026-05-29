@@ -121,7 +121,11 @@ def train(
                 break
 
     # Load best weights before returning
-    best = torch.load(ckpt_dir / "best.pt", map_location=device)
+    ckpt_path = ckpt_dir / "best.pt"
+    if not ckpt_path.exists():
+        log.warning("No checkpoint was saved (val_loss may have been NaN every epoch). Returning current model weights.")
+        return model
+    best = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(best["model_state"])
     log.info(f"Loaded best weights from epoch {best['epoch']} (val_loss={best['val_loss']:.4f})")
 
