@@ -19,7 +19,7 @@ graphcast:
     - "total_precipitation_6hr"
     - "convective_available_potential_energy"   # not always available
   lead_start: 6        # first lead hour to process (build_features.py)
-  lead_end: 96         # last lead hour to process (build_features.py, inclusive)
+  lead_end: 102        # last lead hour to process (build_features.py, inclusive)
   lead_interval: 6     # step between lead hours (build_features.py)
   # Forecast days to use as training samples (from 00Z init).
   # Day N covers leads (N-1)*24+[12,18,24,30]; extend list for longer-range days.
@@ -51,9 +51,6 @@ labels:
 # ── Dataset ──────────────────────────────────────────────────────────────────
 dataset:
   zarr_store: "data/processed/severe_labels.zarr"
-  train_years: [2016, 2017, 2018, 2019, 2020, 2021]
-  val_years: [2022]
-  test_years: [2023]
   # Only include samples with at least one positive cell (avoids all-zero batches)
   positive_only_ratio: 0.5        # 50% of batches guaranteed to have a positive
   normalization_stats: "data/processed/norm_stats.npz"
@@ -67,7 +64,6 @@ dataset:
     - wspd10
     - mslp
     - mslp_grad
-    - cape
     # Pressure levels (925/850/700/500/300 hPa)
     - u_component_of_wind_925hPa
     - u_component_of_wind_850hPa
