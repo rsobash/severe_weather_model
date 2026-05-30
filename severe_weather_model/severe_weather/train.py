@@ -50,6 +50,7 @@ def train(
     val_dl: DataLoader,
     cfg: DictConfig,
     device: torch.device,
+    domain_mask: torch.Tensor | None = None,
 ) -> nn.Module:
     tc = cfg.training
     ckpt_dir = Path(tc.checkpoint_dir)
@@ -76,7 +77,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=tc.amp and device.type == "cuda"):
                 logits = model(features)
-                loss = loss_fn(logits, labels)
+                loss = loss_fn(logits, labels, domain_mask=domain_mask)
 
             scaler.scale(loss).backward()
             if tc.grad_clip:
@@ -99,7 +100,7 @@ def train(
                 labels = labels.to(device, non_blocking=True)
                 with autocast(enabled=tc.amp and device.type == "cuda"):
                     logits = model(features)
-                    loss = loss_fn(logits, labels)
+                    loss = loss_fn(logits, labels, domain_mask=domain_mask)
                 val_loss += loss.item()
         val_loss /= len(val_dl)
 

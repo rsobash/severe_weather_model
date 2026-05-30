@@ -1,6 +1,7 @@
 # ── Domain ──────────────────────────────────────────────────────────────────
 domain:
   grid: "G211"   # G212 = 40km Lambert Conformal (185×129); G211 = 80km (93×65)
+  conus_mask_path: "data/processed/conus_mask_G211.npy"  # build with scripts/build_conus_mask.py
 
 # ── NWP Input (GraphCast) ────────────────────────────────────────────────────
 graphcast:

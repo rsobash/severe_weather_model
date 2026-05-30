@@ -30,11 +30,20 @@ class SevereWindDataset(Dataset):
         end: str,                     # YYYYMMDDHH, inclusive
         forecast_days: list[int],
         norm_stats_path: str | Path,
+        conus_mask_path: str | Path,
         positive_oversample_ratio: float = 0.5,
         feature_names: list[str] | None = None,
         hazard_channels: list[int] | None = None,
     ):
         import zarr
+
+        mask_path = Path(conus_mask_path)
+        if not mask_path.exists():
+            raise FileNotFoundError(
+                f"CONUS mask not found at {mask_path}. "
+                "Run: python scripts/build_conus_mask.py --config config.yaml"
+            )
+        self.domain_mask: np.ndarray = np.load(mask_path)
 
         self.root = zarr.open(str(zarr_store), mode="r")
         stats = np.load(norm_stats_path)
@@ -144,12 +153,14 @@ def make_dataloaders(
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
     forecast_days = list(cfg.graphcast.forecast_days)
 
+    conus_mask_path = cfg.domain.conus_mask_path
     train_ds = SevereWindDataset(
         zarr_store=cfg.dataset.zarr_store,
         start=train_start,
         end=train_end,
         forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
+        conus_mask_path=conus_mask_path,
         positive_oversample_ratio=cfg.dataset.positive_only_ratio,
         feature_names=feature_names,
         hazard_channels=hazard_channels,
@@ -160,6 +171,7 @@ def make_dataloaders(
         end=val_end,
         forecast_days=forecast_days,
         norm_stats_path=norm_stats_path,
+        conus_mask_path=conus_mask_path,
         positive_oversample_ratio=0.0,
         feature_names=feature_names,
         hazard_channels=hazard_channels,

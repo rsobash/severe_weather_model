@@ -17,6 +17,7 @@ import logging
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 from omegaconf import OmegaConf
 
@@ -82,8 +83,12 @@ def main():
 
     loss_fn = build_loss(cfg)
 
+    domain_mask = torch.from_numpy(
+        train_dl.dataset.domain_mask.astype(np.float32)
+    ).unsqueeze(0).unsqueeze(0).to(device)  # (1, 1, NY, NX)
+
     log.info("Training …")
-    model = train(model, loss_fn, train_dl, val_dl, cfg, device)
+    model = train(model, loss_fn, train_dl, val_dl, cfg, device, domain_mask=domain_mask)
 
     final_path = Path(cfg.training.checkpoint_dir) / "final.pt"
     torch.save(model.state_dict(), final_path)

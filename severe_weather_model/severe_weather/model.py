@@ -45,13 +45,42 @@ class FocalLoss(nn.Module):
         self.alpha = alpha
         self.gamma = gamma
 
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        domain_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         bce = nn.functional.binary_cross_entropy_with_logits(
             logits, targets, reduction="none"
         )
         p_t = torch.exp(-bce)
         alpha_t = targets * self.alpha + (1 - targets) * (1 - self.alpha)
         loss = alpha_t * (1 - p_t) ** self.gamma * bce
+        if domain_mask is not None:
+            loss = loss * domain_mask
+            return loss.sum() / (domain_mask.sum() * logits.shape[0] * logits.shape[1])
+        return loss.mean()
+
+
+class WeightedBCELoss(nn.Module):
+    def __init__(self, pos_weight: float = 1.0):
+        super().__init__()
+        self.pos_weight = pos_weight
+
+    def forward(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        domain_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        pw = torch.tensor([self.pos_weight], device=logits.device)
+        loss = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, pos_weight=pw, reduction="none"
+        )
+        if domain_mask is not None:
+            loss = loss * domain_mask
+            return loss.sum() / (domain_mask.sum() * logits.shape[0] * logits.shape[1])
         return loss.mean()
 
 
@@ -60,6 +89,5 @@ def build_loss(cfg: DictConfig) -> nn.Module:
     if lc.type == "focal":
         return FocalLoss(alpha=lc.focal_alpha, gamma=lc.focal_gamma)
     if lc.type == "bce_weighted":
-        pos_weight = torch.tensor([lc.bce_pos_weight])
-        return nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        return WeightedBCELoss(pos_weight=lc.bce_pos_weight)
     raise ValueError(f"Unknown loss type: {lc.type}")

@@ -23,6 +23,9 @@ python scripts/build_features.py --config config.yaml --start 2016010100 --end 2
 # Restrict to training init times with --start / --end (YYYYMMDDHH, both inclusive, both optional):
 python scripts/compute_norm_stats.py --config config.yaml --start 2016010100 --end 2021123118
 
+# 2c. Build CONUS domain mask (run once per grid; output path set by domain.conus_mask_path in config.yaml):
+python scripts/build_conus_mask.py --config config.yaml
+
 # 3. Train
 # --train-start/--train-end and --val-start/--val-end are YYYYMMDDHH, both inclusive:
 python scripts/train.py --config config.yaml \
@@ -51,7 +54,7 @@ The project predicts severe weather probability (wind, hail, tornado) on a CONUS
 - `G212` — 40km Lambert Conformal, 185×129 (default)
 - `G211` — 80km Lambert Conformal, 93×65
 
-Switching grids requires rebuilding the zarr store.
+Switching grids requires rebuilding the zarr store and rerunning `build_conus_mask.py` (update `domain.conus_mask_path` in `config.yaml` accordingly).
 
 **Data pipeline (one-time preprocessing → zarr):**
 - `severe_weather/grid.py` — defines both grids in `_GRID_PARAMS` and exposes `get_grid_params(name)` returning `(nx, ny, dx_metres)`. All grid functions (`get_grid_latlons`, `latlons_to_ij_bulk`, `latlon_to_ij`) accept a `grid_name` argument defaulting to `"G212"`. Both grids share the same LCC projection and SW corner.
@@ -66,15 +69,16 @@ Switching grids requires rebuilding the zarr store.
 - `dataset.feature_names` in `config.yaml` controls which extracted channels are passed to the model. Names must match those in `zarr_store.attrs["feature_names"]`. Leave the list empty to use all channels. Both training and evaluation read this key. Adding or removing features requires rebuilding the zarr store only if the new features were never extracted; otherwise it's a config-only change.
 
 **Training:**
-- `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. Init times are filtered by explicit `start`/`end` YYYYMMDDHH args (no year-list filtering). The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS).
-- `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt`.
+- `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. Init times are filtered by explicit `start`/`end` YYYYMMDDHH args (no year-list filtering). The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS). Loads a CONUS boolean mask (`self.domain_mask`, shape `(NY, NX)`) from `domain.conus_mask_path` at init; raises `FileNotFoundError` if missing.
+- `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt`. Accepts a `domain_mask` tensor `(1, 1, NY, NX)` that restricts loss to CONUS pixels.
 
 **Calibration and evaluation:**
-- `severe_weather/evaluate.py` — temperature scaling (`TemperatureScaler`) fitted via L-BFGS on the validation set. Metrics: Brier score, BSS, AUC-ROC, AUC-PR, CSI/POD/FAR at SPC-aligned probability thresholds (0.05, 0.10, 0.15, 0.25, 0.45). Outputs `logs/eval/metrics.json` and a reliability diagram PNG.
+- `severe_weather/evaluate.py` — temperature scaling (`TemperatureScaler`) fitted via L-BFGS on the validation set. Metrics: Brier score, BSS, AUC-ROC, AUC-PR, CSI/POD/FAR at SPC-aligned probability thresholds (0.05, 0.10, 0.15, 0.25, 0.45). Outputs `logs/eval/metrics.json` and a reliability diagram PNG. Both calibration and metric collection accept a `domain_mask` and restrict to CONUS pixels only.
 
 **Config:**
 - `config.yaml` uses OmegaConf. All paths are relative to the `severe_weather_model/` working directory. Any key can be overridden on the command line via dotlist syntax when calling `scripts/train.py`.
 - `graphcast.lead_start / lead_end / lead_interval` — used only by `build_features.py` to control which lead files are processed into the zarr store.
 - `graphcast.forecast_days` — list of forecast day indices (e.g. `[1, 2, 3, 4]`) used by the dataset at training time. Extending this list (e.g. to Day 7) requires no zarr rebuild as long as the corresponding lead files were already extracted.
+- `domain.conus_mask_path` — path to the prebuilt CONUS boolean mask `.npy` file. Must be regenerated when switching grids.
 
-**Key data dependency order:** LSR SQLite DB → `build_labels.py` → zarr labels; GraphCast NetCDF files → `build_features.py` (with `--compute-norm` on first run) → zarr features + `data/processed/norm_stats.npz`; both must exist before training. Adding a new feature to `features.py` (e.g. `lat`/`lon`) or switching grids requires rebuilding the zarr store and recomputing norm stats before training. Changing label thresholds (`wind_gust_threshold_kts`, `hail_size_threshold_in`, `tornado_ef_threshold`) or `radius_km` requires rebuilding the zarr labels.
+**Key data dependency order:** LSR SQLite DB → `build_labels.py` → zarr labels; GraphCast NetCDF files → `build_features.py` → zarr features; `compute_norm_stats.py` → `norm_stats.npz`; `build_conus_mask.py` → CONUS mask `.npy`; all four must exist before training. Adding a new feature to `features.py` or switching grids requires rebuilding the zarr store, recomputing norm stats, and rerunning `build_conus_mask.py`. Changing label thresholds (`wind_gust_threshold_kts`, `hail_size_threshold_in`, `tornado_ef_threshold`) or `radius_km` requires rebuilding the zarr labels.

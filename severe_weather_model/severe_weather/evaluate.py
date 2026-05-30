@@ -31,7 +31,13 @@ class TemperatureScaler(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x) / self.temperature
 
-    def fit(self, val_dl: DataLoader, device: torch.device, max_iter: int = 50):
+    def fit(
+        self,
+        val_dl: DataLoader,
+        device: torch.device,
+        max_iter: int = 50,
+        domain_mask: np.ndarray | None = None,
+    ):
         """Find T per channel that minimises NLL on the validation set (logits fixed)."""
         self.model.eval()
         self.to(device)
@@ -47,12 +53,22 @@ class TemperatureScaler(nn.Module):
         logits = torch.cat(all_logits)   # (N, C, H, W)
         labels = torch.cat(all_labels)   # (N, C, H, W)
 
+        mask_t = torch.from_numpy(domain_mask) if domain_mask is not None else None
+
         optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=max_iter)
-        criterion = nn.BCEWithLogitsLoss()
 
         def eval_step():
             optimizer.zero_grad()
-            loss = criterion(logits / self.temperature, labels)
+            scaled = logits / self.temperature
+            loss_elem = nn.functional.binary_cross_entropy_with_logits(
+                scaled, labels, reduction="none"
+            )
+            if mask_t is not None:
+                loss = (loss_elem * mask_t).sum() / (
+                    mask_t.sum() * scaled.shape[0] * scaled.shape[1]
+                )
+            else:
+                loss = loss_elem.mean()
             loss.backward()
             return loss
 
@@ -78,7 +94,10 @@ class TemperatureScaler(nn.Module):
 # ── Metric helpers ────────────────────────────────────────────────────────────
 
 def _collect_preds(
-    model: nn.Module, dl: DataLoader, device: torch.device
+    model: nn.Module,
+    dl: DataLoader,
+    device: torch.device,
+    domain_mask: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return per-channel arrays (probs, labels) of shape (C, N) over the full dataloader."""
     model.eval()
@@ -90,12 +109,16 @@ def _collect_preds(
             probs = torch.sigmoid(logits).cpu().numpy()  # (B, C, H, W)
             all_probs.append(probs)
             all_labels.append(labels.numpy())
-    # concatenate along batch dim → (N_batches*B, C, H, W), then reshape to (C, -1)
     probs_arr  = np.concatenate(all_probs,  axis=0)  # (N, C, H, W)
     labels_arr = np.concatenate(all_labels, axis=0)  # (N, C, H, W)
     n_channels = probs_arr.shape[1]
-    probs_arr  = probs_arr.transpose(1, 0, 2, 3).reshape(n_channels, -1)   # (C, N*H*W)
-    labels_arr = labels_arr.transpose(1, 0, 2, 3).reshape(n_channels, -1)  # (C, N*H*W)
+    if domain_mask is not None:
+        # (N, C, H, W) → (N, C, N_valid) → (C, N*N_valid)
+        probs_arr  = probs_arr[:, :, domain_mask].transpose(1, 0, 2).reshape(n_channels, -1)
+        labels_arr = labels_arr[:, :, domain_mask].transpose(1, 0, 2).reshape(n_channels, -1)
+    else:
+        probs_arr  = probs_arr.transpose(1, 0, 2, 3).reshape(n_channels, -1)
+        labels_arr = labels_arr.transpose(1, 0, 2, 3).reshape(n_channels, -1)
     return probs_arr, labels_arr
 
 

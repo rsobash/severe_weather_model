@@ -101,11 +101,15 @@ def main():
     test_dl = DataLoader(test_ds, batch_size=cfg.training.batch_size,
                          num_workers=cfg.training.num_workers)
 
+    domain_mask = test_ds.domain_mask  # (NY, NX) bool
+
     # ── Temperature scaling ───────────────────────────────────────────────────
     cal_path = cal_dir / "temperature.pt"
     if not args.skip_calibration:
         log.info("Fitting temperature scaling on validation set …")
-        scaler = TemperatureScaler(model, n_channels=len(hazard_channels)).fit(val_dl, device)
+        scaler = TemperatureScaler(model, n_channels=len(hazard_channels)).fit(
+            val_dl, device, domain_mask=domain_mask
+        )
         scaler.save(cal_path)
         calibrated_model = scaler
     elif cal_path.exists():
@@ -120,7 +124,7 @@ def main():
     _HAZARD_NAMES = [*_HAZARD_ORDER, "any"]
 
     log.info("Collecting test-set predictions …")
-    probs, labels = _collect_preds(calibrated_model, test_dl, device)  # (C, N)
+    probs, labels = _collect_preds(calibrated_model, test_dl, device, domain_mask=domain_mask)  # (C, N)
 
     all_metrics: dict[str, dict] = {}
     for local_ch, global_ch in enumerate(hazard_channels):
