@@ -124,32 +124,85 @@ def main():
 
     # ── Evaluate on test set ─────────────────────────────────────────────────
     _HAZARD_NAMES = [*_HAZARD_ORDER, "any"]
+    calibration_applied = calibrated_model is not model
 
     log.info("Collecting test-set predictions …")
-    probs, labels = _collect_preds(calibrated_model, test_dl, device, domain_mask=domain_mask)  # (C, N)
+    probs, labels = _collect_preds(calibrated_model, test_dl, device, domain_mask=domain_mask)
 
-    all_metrics: dict[str, dict] = {}
+    raw_probs = None
+    if calibration_applied:
+        log.info("Collecting uncalibrated test-set predictions …")
+        raw_probs, _ = _collect_preds(model, test_dl, device, domain_mask=domain_mask)
+
+    def _metrics_for(p, l):
+        return {
+            _HAZARD_NAMES[global_ch]: compute_metrics(
+                p[local_ch], l[local_ch],
+                thresholds=cfg.evaluation.prob_thresholds,
+            )
+            for local_ch, global_ch in enumerate(hazard_channels)
+        }
+
+    cal_metrics = _metrics_for(probs, labels)
+    for name, m in cal_metrics.items():
+        log.info(f"  [{name}] brier={m['brier_score']:.4f} auc_roc={m['auc_roc']:.4f}")
+
     for local_ch, global_ch in enumerate(hazard_channels):
         name = _HAZARD_NAMES[global_ch]
-        ch_metrics = compute_metrics(
-            probs[local_ch], labels[local_ch],
-            thresholds=cfg.evaluation.prob_thresholds,
-        )
-        all_metrics[name] = ch_metrics
-        log.info(f"  [{name}] brier={ch_metrics['brier_score']:.4f} "
-                 f"auc_roc={ch_metrics['auc_roc']:.4f}")
         plot_reliability(
             probs[local_ch], labels[local_ch],
             output_dir / f"reliability_{name}.png",
             hazard_name=name,
+            probs_pre=raw_probs[local_ch] if raw_probs is not None else None,
         )
+
+    def _serialize(m: dict) -> dict:
+        return {n: {k: float(v) for k, v in ch.items()} for n, ch in m.items()}
+
+    output: dict = {"calibrated": _serialize(cal_metrics)}
+    if raw_probs is not None:
+        raw_metrics = _metrics_for(raw_probs, labels)
+        output["uncalibrated"] = _serialize(raw_metrics)
+        for name, m in raw_metrics.items():
+            log.info(f"  [{name}] (uncal) brier={m['brier_score']:.4f} auc_roc={m['auc_roc']:.4f}")
+
+    # ── Per-forecast-day metrics ──────────────────────────────────────────────
+    by_day: dict = {}
+    for day in forecast_days:
+        day_ds = SevereWindDataset(
+            zarr_store=cfg.dataset.zarr_store,
+            start=args.test_start,
+            end=args.test_end,
+            forecast_days=[day],
+            norm_stats_path=norm_stats,
+            conus_mask_path=cfg.domain.conus_mask_path,
+            positive_oversample_ratio=0.0,
+            feature_names=feature_names,
+            hazard_channels=hazard_channels,
+        )
+        if len(day_ds) == 0:
+            log.warning(f"No test samples for forecast day {day}, skipping.")
+            continue
+        day_dl = DataLoader(day_ds, batch_size=cfg.training.batch_size,
+                            num_workers=cfg.training.num_workers)
+        log.info(f"Day {day}: collecting predictions ({len(day_ds)} samples) …")
+        day_probs, day_labels = _collect_preds(
+            calibrated_model, day_dl, device, domain_mask=domain_mask
+        )
+        day_entry: dict = {"calibrated": _serialize(_metrics_for(day_probs, day_labels))}
+        if calibration_applied:
+            day_raw_probs, _ = _collect_preds(model, day_dl, device, domain_mask=domain_mask)
+            day_entry["uncalibrated"] = _serialize(_metrics_for(day_raw_probs, day_labels))
+        by_day[f"day{day}"] = day_entry
+        summary_name = "any" if "any" in day_entry["calibrated"] else _HAZARD_NAMES[hazard_channels[0]]
+        sm = day_entry["calibrated"][summary_name]
+        log.info(f"  day{day} [{summary_name}] brier={sm['brier_score']:.4f} auc_roc={sm['auc_roc']:.4f}")
+    if by_day:
+        output["by_forecast_day"] = by_day
 
     metrics_path = output_dir / "metrics.json"
     with open(metrics_path, "w") as f:
-        json.dump(
-            {name: {k: float(v) for k, v in m.items()} for name, m in all_metrics.items()},
-            f, indent=2,
-        )
+        json.dump(output, f, indent=2)
     log.info(f"Metrics → {metrics_path}")
 
 

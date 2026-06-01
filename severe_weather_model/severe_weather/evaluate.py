@@ -165,8 +165,9 @@ def plot_reliability(
     output_path: str | Path,
     hazard_name: str = "",
     n_bins: int = 10,
+    probs_pre: np.ndarray | None = None,
 ):
-    """Save a reliability diagram to output_path."""
+    """Save a reliability diagram to output_path. If probs_pre is given, overlay uncalibrated curve."""
     import matplotlib.pyplot as plt
 
     frac_pos, mean_pred = calibration_curve(labels, probs, n_bins=n_bins, strategy="uniform")
@@ -174,7 +175,11 @@ def plot_reliability(
     title = f"Reliability Diagram — {hazard_name}" if hazard_name else "Reliability Diagram"
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.plot([0, 1], [0, 1], "k--", label="Perfect calibration")
-    ax.plot(mean_pred, frac_pos, "o-", label="Model")
+    if probs_pre is not None:
+        frac_pos_pre, mean_pred_pre = calibration_curve(labels, probs_pre, n_bins=n_bins, strategy="uniform")
+        ax.plot(mean_pred_pre, frac_pos_pre, "s--", color="gray", label="Uncalibrated")
+    label = "Calibrated" if probs_pre is not None else "Model"
+    ax.plot(mean_pred, frac_pos, "o-", label=label)
     ax.set_xlabel("Mean predicted probability")
     ax.set_ylabel("Observed frequency")
     ax.set_title(title)
