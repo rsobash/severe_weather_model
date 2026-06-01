@@ -39,6 +39,12 @@ def main():
     args = parse_args()
     cfg = OmegaConf.load(args.config)
 
+    mask_path = Path(cfg.domain.conus_mask_path)
+    if not mask_path.exists():
+        log.error(f"CONUS mask not found at {mask_path}. Run build_conus_mask.py first.")
+        return
+    domain_mask = np.load(mask_path).ravel()  # (H*W,) boolean
+
     store_path = cfg.dataset.zarr_store
     root = zarr.open(store_path, mode="r")
 
@@ -56,7 +62,7 @@ def main():
         log.error("No feature keys matched the requested range.")
         return
 
-    log.info(f"Computing stats over {len(all_keys)} feature arrays")
+    log.info(f"Computing stats over {len(all_keys)} feature arrays ({domain_mask.sum()} CONUS pixels each)")
 
     n_sum = None
     x_sum = None
@@ -64,18 +70,17 @@ def main():
 
     for key in tqdm(all_keys, desc="accumulating"):
         arr = root["features"][key][:]   # (C, H, W)
-        c, h, w = arr.shape
-        n_pixels = h * w
+        c = arr.shape[0]
 
         if n_sum is None:
             n_sum  = np.zeros(c, dtype=np.float64)
             x_sum  = np.zeros(c, dtype=np.float64)
             x2_sum = np.zeros(c, dtype=np.float64)
 
-        spatial = arr.reshape(c, -1)          # (C, H*W)
-        n_sum  += n_pixels
-        x_sum  += spatial.sum(axis=1)
-        x2_sum += (spatial ** 2).sum(axis=1)
+        masked = arr.reshape(c, -1)[:, domain_mask]  # (C, n_conus)
+        n_sum  += masked.shape[1]
+        x_sum  += masked.sum(axis=1)
+        x2_sum += (masked ** 2).sum(axis=1)
 
     mean = (x_sum / n_sum).astype(np.float32)
     var  = x2_sum / n_sum - (x_sum / n_sum) ** 2

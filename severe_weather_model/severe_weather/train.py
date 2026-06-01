@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from omegaconf import DictConfig
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -58,7 +58,7 @@ def train(
 
     optimizer = _make_optimizer(model, cfg)
     scheduler = _make_scheduler(optimizer, cfg, len(train_dl))
-    scaler = GradScaler(enabled=tc.amp and device.type == "cuda")
+    scaler = GradScaler(device.type, enabled=tc.amp and device.type == "cuda")
 
     model.to(device)
     loss_fn.to(device)
@@ -75,7 +75,7 @@ def train(
             labels = labels.to(device, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with autocast(enabled=tc.amp and device.type == "cuda"):
+            with autocast(device.type, enabled=tc.amp and device.type == "cuda"):
                 logits = model(features)
                 loss = loss_fn(logits, labels, domain_mask=domain_mask)
 
@@ -98,7 +98,7 @@ def train(
             for features, labels in tqdm(val_dl, desc=f"Epoch {epoch} val", leave=False):
                 features = features.to(device, non_blocking=True)
                 labels = labels.to(device, non_blocking=True)
-                with autocast(enabled=tc.amp and device.type == "cuda"):
+                with autocast(device.type, enabled=tc.amp and device.type == "cuda"):
                     logits = model(features)
                     loss = loss_fn(logits, labels, domain_mask=domain_mask)
                 val_loss += loss.item()
