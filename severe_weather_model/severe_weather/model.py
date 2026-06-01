@@ -58,7 +58,7 @@ class FocalLoss(nn.Module):
         alpha_t = targets * self.alpha + (1 - targets) * (1 - self.alpha)
         loss = alpha_t * (1 - p_t) ** self.gamma * bce
         if domain_mask is not None:
-            loss = loss * domain_mask
+            loss = torch.where(domain_mask.bool(), loss, torch.zeros_like(loss))
             return loss.sum() / (domain_mask.sum() * logits.shape[0] * logits.shape[1])
         return loss.mean()
 
@@ -79,7 +79,7 @@ class WeightedBCELoss(nn.Module):
             logits, targets, pos_weight=pw, reduction="none"
         )
         if domain_mask is not None:
-            loss = loss * domain_mask
+            loss = torch.where(domain_mask.bool(), loss, torch.zeros_like(loss))
             return loss.sum() / (domain_mask.sum() * logits.shape[0] * logits.shape[1])
         return loss.mean()
 

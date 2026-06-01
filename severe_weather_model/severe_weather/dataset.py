@@ -128,7 +128,7 @@ class SevereWindDataset(Dataset):
                 arr = arr[self._feat_idx]             # (C_sel, H, W)
             arr = normalize(arr, self.mean, self.std)
             stacked.append(arr)
-        features = np.concatenate(stacked, axis=0)   # (4*C_sel, H, W)
+        features = np.nan_to_num(np.concatenate(stacked, axis=0), nan=0.0)  # (4*C_sel, H, W)
 
         label = self.root["labels"][lk][:]               # (3, H, W)
         any_ch = label.max(axis=0, keepdims=True)        # (1, H, W)
