@@ -50,11 +50,13 @@ class TemperatureScaler(nn.Module):
                 all_logits.append(self.model(feats).cpu())
                 all_labels.append(labels.cpu())
 
-        logits = torch.cat(all_logits)   # (N, C, H, W)
-        labels = torch.cat(all_labels)   # (N, C, H, W)
+        logits = torch.cat(all_logits)   # (N, C, H, W) — CPU
+        labels = torch.cat(all_labels)   # (N, C, H, W) — CPU
 
-        mask_t = torch.from_numpy(domain_mask) if domain_mask is not None else None
+        mask_t = torch.from_numpy(domain_mask) if domain_mask is not None else None  # CPU
 
+        # Optimise on CPU so the full logit tensor doesn't need to re-enter GPU memory
+        self.temperature.data = self.temperature.data.cpu()
         optimizer = torch.optim.LBFGS([self.temperature], lr=0.01, max_iter=max_iter)
 
         def eval_step():
@@ -73,6 +75,7 @@ class TemperatureScaler(nn.Module):
             return loss
 
         optimizer.step(eval_step)
+        self.temperature.data = self.temperature.data.to(device)
         t_vals = self.temperature.data.squeeze().tolist()
         if isinstance(t_vals, float):
             t_vals = [t_vals]
