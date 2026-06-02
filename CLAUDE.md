@@ -46,6 +46,12 @@ python scripts/evaluate.py --config config.yaml --checkpoint models/checkpoints/
     --val-start 2022010100 --val-end 2022123118 \
     --test-start 2023010100 --test-end 2023123118 \
     --skip-calibration
+
+# 5. Plot probability maps for a single initialization
+python scripts/plot_probs.py --config config.yaml \
+    --checkpoint models/checkpoints/best.pt \
+    --init 2023060100 \
+    --output plots/probs_2023060100.png
 ```
 
 ## Architecture
@@ -70,10 +76,10 @@ Switching grids requires rebuilding the zarr store and rerunning `build_conus_ma
 
 **Training:**
 - `severe_weather/dataset.py` — `SevereWindDataset` produces one sample per convective day per 00Z init. Each sample stacks 4 consecutive 6-hourly lead arrays along the channel axis → `(4*C, NY, NX)` features. Forecast days are controlled by `graphcast.forecast_days` in `config.yaml` (e.g. `[1, 2, 3, 4]`); leads for Day N are derived as `(N-1)*24 + [12, 18, 24, 30]`. Init times are filtered by explicit `start`/`end` YYYYMMDDHH args (no year-list filtering). The dataset slices to the configured feature subset (if any), normalises each lead independently with the same per-channel stats, and oversamples positive samples at a configurable ratio (default 50%). Augmentation is horizontal/vertical flips (symmetrically valid for CONUS). Loads a CONUS boolean mask (`self.domain_mask`, shape `(NY, NX)`) from `domain.conus_mask_path` at init; raises `FileNotFoundError` if missing.
-- `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt`. Accepts a `domain_mask` tensor `(1, 1, NY, NX)` that restricts loss to CONUS pixels.
+- `severe_weather/train.py` — training loop with AMP (`torch.cuda.amp`), AdamW + cosine LR schedule with linear warmup, gradient clipping, and early stopping. Best checkpoint saved to `models/checkpoints/best.pt` (full dict with `epoch`, `model_state`, `val_loss`). `scripts/train.py` additionally saves `final.pt` (bare state dict, same weights as `best.pt`) after training completes. Accepts a `domain_mask` tensor `(1, 1, NY, NX)` that restricts loss to CONUS pixels.
 
 **Calibration and evaluation:**
-- `severe_weather/evaluate.py` — temperature scaling (`TemperatureScaler`) fitted via L-BFGS on the validation set. Metrics: Brier score, BSS, AUC-ROC, AUC-PR, CSI/POD/FAR at SPC-aligned probability thresholds (0.05, 0.10, 0.15, 0.25, 0.45). Outputs `logs/eval/metrics.json` and a reliability diagram PNG. Both calibration and metric collection accept a `domain_mask` and restrict to CONUS pixels only.
+- `severe_weather/evaluate.py` — temperature scaling (`TemperatureScaler`) fitted via L-BFGS on the validation set. Metrics: Brier score, BSS (relative to sample climatology), AUC-ROC, AUC-PR, CSI/POD/FAR at SPC-aligned probability thresholds (0.05, 0.10, 0.15, 0.25, 0.45). All metrics are restricted to CONUS pixels via `domain_mask`. `scripts/evaluate.py` outputs `logs/eval/metrics.json` with top-level `calibrated`/`uncalibrated` keys plus a `by_forecast_day` breakdown, and saves a reliability diagram PNG per hazard.
 
 **Config:**
 - `config.yaml` uses OmegaConf. All paths are relative to the `severe_weather_model/` working directory. Any key can be overridden on the command line via dotlist syntax when calling `scripts/train.py`.

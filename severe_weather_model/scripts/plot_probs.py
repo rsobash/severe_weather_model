@@ -7,7 +7,7 @@ automatically unless --no-calibration is passed.
 
 Usage (run from severe_weather_model/):
     python scripts/plot_probs.py --config config.yaml \
-        --checkpoint-dir models/checkpoints \
+        --checkpoint models/checkpoints/best.pt \
         --init 2023060100 \
         --output plots/probs_2023060100.png
 """
@@ -57,8 +57,8 @@ _BOUNDARIES = THRESHOLDS + [1.01]   # sentinel keeps ≥60% in the last bin
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="config.yaml")
-    p.add_argument("--checkpoint-dir", required=True,
-                   help="Base dir; expects <dir>/day{N}/best.pt per forecast day")
+    p.add_argument("--checkpoint", required=True,
+                   help="Path to model checkpoint (best.pt or final.pt)")
     p.add_argument("--init", required=True, metavar="YYYYMMDDHH",
                    help="00Z initialization time to plot")
     p.add_argument("--output", default=None,
@@ -180,7 +180,7 @@ def main():
     if init_str[-2:] != "00":
         log.warning("--init does not end in '00'; only 00Z inits have features in the zarr store.")
 
-    ckpt_base = Path(args.checkpoint_dir)
+    ckpt_path = Path(args.checkpoint)
     cal_dir = Path(cfg.calibration.calibration_dir)
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
@@ -210,6 +210,23 @@ def main():
 
     log.info(f"in_channels={in_channels}, hazard_channels={hazard_channels}, device={device}")
 
+    # Load model once
+    model = build_model(cfg, in_channels=in_channels)
+    ckpt = torch.load(ckpt_path, map_location=device)
+    model.load_state_dict(ckpt.get("model_state", ckpt))
+    model.to(device)
+    log.info(f"Loaded checkpoint: {ckpt_path}")
+
+    cal_path = cal_dir / "temperature.pt"
+    if not args.no_calibration and cal_path.exists():
+        log.info(f"Applying calibration from {cal_path}")
+        inference_model = TemperatureScaler.load(model, cal_path)
+        inference_model.to(device)
+    else:
+        if not args.no_calibration:
+            log.info("No calibration file found, using raw logits.")
+        inference_model = model
+
     labels_grp = root.get("labels", {})
 
     grid_name = cfg.domain.grid
@@ -226,33 +243,13 @@ def main():
     }
 
     # Collect probability grids: probs[day_idx][local_ch] = (NY, NX)
-    day_probs: list[tuple[int, np.ndarray]] = []   # (day, prob array (C_out, NY, NX))
+    day_probs: list[tuple[int, np.ndarray]] = []
 
     for day in forecast_days:
-        ckpt_path = ckpt_base / f"day{day}" / "best.pt"
-        if not ckpt_path.exists():
-            log.warning(f"Day {day}: no checkpoint at {ckpt_path}, skipping.")
-            continue
-
         x = load_features_for_day(root, init_str, day, feat_idx, mean, std)
         if x is None:
             log.warning(f"Day {day}: features unavailable, skipping.")
             continue
-
-        model = build_model(cfg, in_channels=in_channels)
-        ckpt = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(ckpt.get("model_state", ckpt))
-        model.to(device)
-
-        cal_path = cal_dir / f"temperature_day{day}.pt"
-        if not args.no_calibration and cal_path.exists():
-            log.info(f"Day {day}: applying calibration from {cal_path}")
-            inference_model = TemperatureScaler.load(model, cal_path)
-            inference_model.to(device)
-        else:
-            if not args.no_calibration:
-                log.info(f"Day {day}: no calibration file found, using raw logits.")
-            inference_model = model
 
         probs = run_inference(inference_model, x, device)  # (C_out, NY, NX)
         day_probs.append((day, probs))
