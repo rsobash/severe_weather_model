@@ -180,7 +180,7 @@ def main():
         by_day[f"day{day}"] = day_entry
         summary_name = "any" if "any" in day_entry["calibrated"] else _HAZARD_NAMES[hazard_channels[0]]
         sm = day_entry["calibrated"][summary_name]
-        log.info(f"  day{day} [{summary_name}] brier={sm['brier_score']:.4f} auc_roc={sm['auc_roc']:.4f}")
+        log.info(f"  day{day} [{summary_name}] brier={sm['brier_score']:.4f} bss={sm['brier_skill_score']:.4f} auc_roc={sm['auc_roc']:.4f}")
 
     # ── Aggregate overall metrics across all days ─────────────────────────────
     output: dict = {}
@@ -192,13 +192,13 @@ def main():
         cal_metrics = _metrics_for(probs, labels)
         output["calibrated"] = _serialize(cal_metrics)
         for name, m in cal_metrics.items():
-            log.info(f"  [{name}] brier={m['brier_score']:.4f} auc_roc={m['auc_roc']:.4f}")
+            log.info(f"  [{name}] brier={m['brier_score']:.4f} bss={m['brier_skill_score']:.4f} auc_roc={m['auc_roc']:.4f}")
 
         if raw_probs is not None:
             raw_metrics = _metrics_for(raw_probs, labels)
             output["uncalibrated"] = _serialize(raw_metrics)
             for name, m in raw_metrics.items():
-                log.info(f"  [{name}] (uncal) brier={m['brier_score']:.4f} auc_roc={m['auc_roc']:.4f}")
+                log.info(f"  [{name}] (uncal) brier={m['brier_score']:.4f} bss={m['brier_skill_score']:.4f} auc_roc={m['auc_roc']:.4f}")
 
         for local_ch, global_ch in enumerate(hazard_channels):
             name = _HAZARD_NAMES[global_ch]
