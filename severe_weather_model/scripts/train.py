@@ -63,36 +63,45 @@ def main():
         )
         sys.exit(1)
 
-    log.info("Building dataloaders …")
-    train_dl, val_dl = make_dataloaders(
-        cfg, norm_stats,
-        train_start=args.train_start, train_end=args.train_end,
-        val_start=args.val_start, val_end=args.val_end,
-    )
-    log.info(f"  train={len(train_dl.dataset)} val={len(val_dl.dataset)} samples")
+    forecast_days = list(cfg.graphcast.forecast_days)
+    base_ckpt_dir = cfg.training.checkpoint_dir
 
-    # Infer in_channels from the first batch
-    sample_feats, _ = next(iter(train_dl))
-    in_channels = sample_feats.shape[1]
-    log.info(f"  in_channels={in_channels}")
+    for day in forecast_days:
+        log.info(f"=== Training forecast day {day} ===")
+        day_cfg = OmegaConf.merge(cfg, OmegaConf.create({
+            "graphcast": {"forecast_days": [day]},
+            "training": {"checkpoint_dir": f"{base_ckpt_dir}/day{day}"},
+        }))
 
-    log.info("Building model …")
-    model = build_model(cfg, in_channels=in_channels)
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log.info(f"  {n_params:,} trainable parameters")
+        log.info("Building dataloaders …")
+        train_dl, val_dl = make_dataloaders(
+            day_cfg, norm_stats,
+            train_start=args.train_start, train_end=args.train_end,
+            val_start=args.val_start, val_end=args.val_end,
+        )
+        log.info(f"  train={len(train_dl.dataset)} val={len(val_dl.dataset)} samples")
 
-    loss_fn = build_loss(cfg)
+        sample_feats, _ = next(iter(train_dl))
+        in_channels = sample_feats.shape[1]
+        log.info(f"  in_channels={in_channels}")
 
-    domain_mask = torch.from_numpy(
-        train_dl.dataset.domain_mask.astype(np.float32)
-    ).unsqueeze(0).unsqueeze(0).to(device)  # (1, 1, NY, NX)
+        log.info("Building model …")
+        model = build_model(day_cfg, in_channels=in_channels)
+        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        log.info(f"  {n_params:,} trainable parameters")
 
-    log.info("Training …")
-    model = train(model, loss_fn, train_dl, val_dl, cfg, device, domain_mask=domain_mask)
+        loss_fn = build_loss(day_cfg)
 
-    final_path = Path(cfg.training.checkpoint_dir) / "final.pt"
-    torch.save(model.state_dict(), final_path)
-    log.info(f"Final model saved → {final_path}")
+        domain_mask = torch.from_numpy(
+            train_dl.dataset.domain_mask.astype(np.float32)
+        ).unsqueeze(0).unsqueeze(0).to(device)  # (1, 1, NY, NX)
+
+        log.info("Training …")
+        model = train(model, loss_fn, train_dl, val_dl, day_cfg, device, domain_mask=domain_mask)
+
+        final_path = Path(day_cfg.training.checkpoint_dir) / "final.pt"
+        torch.save(model.state_dict(), final_path)
+        log.info(f"Final model saved → {final_path}")
 
 
 if __name__ == "__main__":
