@@ -210,15 +210,7 @@ def main():
 
     log.info(f"in_channels={in_channels}, hazard_channels={hazard_channels}, device={device}")
 
-    # Gather labels if available (for optional overlay annotation)
-    label_key = (init_dt + timedelta(hours=12)).strftime("%Y%m%d%H")
     labels_grp = root.get("labels", {})
-    obs_labels = None
-    if label_key in labels_grp:
-        raw = labels_grp[label_key][:]              # (3, NY, NX): wind, hail, tornado
-        any_ch = raw.max(axis=0, keepdims=True)
-        obs_labels = np.concatenate([raw, any_ch], axis=0)  # (4, NY, NX)
-        log.info(f"Loaded observed labels for {label_key}")
 
     grid_name = cfg.domain.grid
     lats, lons = get_grid_latlons(grid_name)
@@ -286,6 +278,14 @@ def main():
         lead_start = (day - 1) * 24 + 12
         valid_dt = init_dt + timedelta(hours=lead_start)
         valid_label = valid_dt.strftime("%Y-%m-%d %HZ")
+
+        label_key = valid_dt.strftime("%Y%m%d%H")
+        obs_labels = None
+        if label_key in labels_grp:
+            raw = labels_grp[label_key][:]
+            any_ch = raw.max(axis=0, keepdims=True)
+            obs_labels = np.concatenate([raw, any_ch], axis=0)  # (4, NY, NX)
+            log.info(f"Day {day}: loaded observed labels for {label_key}")
 
         for col_idx, (local_ch, global_ch) in enumerate(enumerate(hazard_channels)):
             hazard = _HAZARD_NAMES[global_ch]
