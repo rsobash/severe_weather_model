@@ -136,11 +136,12 @@ def build_label_store(valid_times: list[datetime], cfg: DictConfig, zarr_root) -
 
     for vt in valid_times:
         key = "labels/" + vt.strftime("%Y%m%d%H")
-        if key in zarr_root:
-            continue
         try:
             grid = build_label_grid(vt, cfg, lsr_db_path)
-            arr = zarr_root.create_array(key, shape=grid.shape, dtype="float32", chunks=(3, 32, 32))
-            arr[:] = grid
+            if key in zarr_root:
+                zarr_root[key][:] = grid
+            else:
+                arr = zarr_root.create_array(key, shape=grid.shape, dtype="float32", chunks=(3, 32, 32))
+                arr[:] = grid
         except Exception as e:
             log.warning(f"Label build failed for {vt}: {e}")
