@@ -95,7 +95,7 @@ def _lapse_rate(t700: np.ndarray, t500: np.ndarray) -> np.ndarray:
 
 # ── Main feature extraction ───────────────────────────────────────────────────
 
-def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> tuple[np.ndarray, list[str]]:
+def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int, valid_time=None) -> tuple[np.ndarray, list[str]]:
     """
     Extract and regrid all features from one GraphCast xr.Dataset snapshot.
 
@@ -162,11 +162,14 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int) -> tuple[n
     nx, ny, _ = get_grid_params(grid_name)
     lead_norm = np.full((ny, nx), lead_hour / 240.0, dtype=np.float32)  # normalise to ~0-1 (0-240h)
 
-    valid_time = ds.time.values
-    if hasattr(valid_time, "__len__"):
-        valid_time = valid_time[0]
     import pandas as pd
-    ts = pd.Timestamp(valid_time)
+    if valid_time is not None:
+        ts = pd.Timestamp(valid_time)
+    else:
+        vt = ds.time.values
+        if hasattr(vt, "__len__"):
+            vt = vt[0]
+        ts = pd.Timestamp(vt)
     doy_sin = np.full((ny, nx), np.sin(2 * np.pi * ts.day_of_year / 365.25), dtype=np.float32)
     doy_cos = np.full((ny, nx), np.cos(2 * np.pi * ts.day_of_year / 365.25), dtype=np.float32)
     hod_sin = np.full((ny, nx), np.sin(2 * np.pi * ts.hour / 24.0), dtype=np.float32)

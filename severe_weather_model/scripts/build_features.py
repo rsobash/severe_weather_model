@@ -56,16 +56,17 @@ def main():
     local_dir = Path(cfg.graphcast.local_dir)
 
     end = args.end or args.start
-    init_times = pd.date_range(
+    init_range = pd.date_range(
         pd.to_datetime(args.start, format="%Y%m%d%H"),
         pd.to_datetime(end, format="%Y%m%d%H"),
         freq="24h",
-    ).strftime("%Y%m%d%H").tolist()
+    )
 
-    log.info(f"Processing {len(init_times)} init time(s), {len(lead_hours)} lead hour(s) each")
+    log.info(f"Processing {len(init_range)} init time(s), {len(lead_hours)} lead hour(s) each")
 
     feature_names: list[str] = []
-    for init_str in tqdm(init_times, desc="inits"):
+    for init_dt in tqdm(init_range, desc="inits"):
+        init_str = init_dt.strftime("%Y%m%d%H")
         for lead_h in lead_hours:
             fpath = local_dir / f"weathernext_{init_str}_{lead_h:03d}_mean.nc"
             if not fpath.exists():
@@ -74,7 +75,8 @@ def main():
             try:
                 ds = load_graphcast_file(fpath)
                 step = ds.isel(prediction_timedelta=0) if "prediction_timedelta" in ds.dims else ds.isel(time=0)
-                feats, names = extract_features(step, cfg, lead_hour=lead_h)
+                valid_dt = init_dt + pd.Timedelta(hours=lead_h)
+                feats, names = extract_features(step, cfg, lead_hour=lead_h, valid_time=valid_dt)
                 if not feature_names:
                     feature_names = names
 
