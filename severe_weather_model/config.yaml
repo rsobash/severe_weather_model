@@ -109,7 +109,7 @@ dataset:
 # ── Model ────────────────────────────────────────────────────────────────────
 model:
   architecture: "unet"
-  encoder: "resnet34"             # resnet18 | resnet34 | efficientnet-b2
+  encoder: "tu-swin_tiny_patch4_window7_224"  # resnet18 | resnet34 | efficientnet-b2 | tu-swin_tiny_patch4_window7_224
   encoder_weights: null           # null = random init; "imagenet" = pretrained
   in_channels: 32                 # set automatically by feature_engineering.py
   hazard_channels: [0, 1, 2, 3]  # 0=wind 1=hail 2=tornado 3=any; subset e.g. [2] for tornado only
