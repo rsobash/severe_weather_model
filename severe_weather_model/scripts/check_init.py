@@ -72,7 +72,7 @@ def main():
     root = zarr.open(cfg.dataset.zarr_store, mode="r")
 
     feature_names = list(root.attrs.get("feature_names", []))
-    lead_hours = range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval)
+    lead_hours = range(cfg.nwp.lead_start, cfg.nwp.lead_end + 1, cfg.nwp.lead_interval)
 
     print(f"\nFeature channels ({len(feature_names)}):")
     for i, name in enumerate(feature_names):

@@ -151,7 +151,7 @@ def make_dataloaders(
 ) -> tuple[DataLoader, DataLoader]:
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
-    forecast_days = list(cfg.graphcast.forecast_days)
+    forecast_days = list(cfg.nwp.forecast_days)
 
     conus_mask_path = cfg.domain.conus_mask_path
     train_ds = SevereWindDataset(

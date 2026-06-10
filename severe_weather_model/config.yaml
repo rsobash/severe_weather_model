@@ -3,13 +3,22 @@ domain:
   grid: "G211"   # G212 = 40km Lambert Conformal (185×129); G211 = 80km (93×65)
   conus_mask_path: "data/processed/conus_mask_G211.npy"  # build with scripts/build_conus_mask.py
 
-# ── NWP Input (GraphCast) ────────────────────────────────────────────────────
-graphcast:
-  source: "local"                        # "gcs" | "local"
-  gcs_bucket: "dm-graphcast"
-  gcs_prefix: "dataset/source-era5_date"
+# ── NWP Input ────────────────────────────────────────────────────────────────
+# To switch sources, update: source, local_dir, filename_pattern, lead_start/end/interval.
+# Filename tokens: {init_str}=YYYYMMDDHH, {lead:03d}=zero-padded lead hours, {HH}=init hour.
+# GEFS example: source=gefs, filename_pattern="geavg.t{HH}z.pgrb2.0p50.f{lead:03d}"
+nwp:
+  source: "graphcast"                    # "graphcast" | "gefs"
   local_dir: "data/raw/graphcast"
-  # Variables to extract (surface + pressure levels)
+  filename_pattern: "weathernext_{init_str}_{lead:03d}_mean.nc"
+  lead_start: 6        # first lead hour to process (build_features.py)
+  lead_end: 102        # last lead hour to process (build_features.py, inclusive)
+  lead_interval: 6     # step between lead hours (build_features.py)
+  # Forecast days to use as training samples (from 00Z init).
+  # Day N covers leads (N-1)*24+[12,18,24,30]; extend list for longer-range days.
+  forecast_days: [1, 2, 3, 4]
+  # Variable lists use ERA5/GraphCast naming convention; the GEFS loader normalises
+  # GRIB shortNames to these names before extract_features runs.
   surface_vars:
     - "10m_u_component_of_wind"
     - "10m_v_component_of_wind"
@@ -19,12 +28,6 @@ graphcast:
     - "surface_pressure"
     - "total_precipitation_6hr"
     - "convective_available_potential_energy"   # not always available
-  lead_start: 6        # first lead hour to process (build_features.py)
-  lead_end: 102        # last lead hour to process (build_features.py, inclusive)
-  lead_interval: 6     # step between lead hours (build_features.py)
-  # Forecast days to use as training samples (from 00Z init).
-  # Day N covers leads (N-1)*24+[12,18,24,30]; extend list for longer-range days.
-  forecast_days: [1, 2, 3, 4]
   pressure_levels: [925, 850, 700, 500, 300]
   pressure_vars:
     - "u_component_of_wind"

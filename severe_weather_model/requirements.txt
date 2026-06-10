@@ -7,6 +7,7 @@ segmentation-models-pytorch>=0.3.3
 xarray>=2024.1.0
 zarr>=2.17.0
 netCDF4>=1.6.5
+cfgrib>=0.9.10      # GEFS GRIB support; also requires eccodes (conda: conda-forge::eccodes, brew: eccodes)
 
 # Grid operations
 numpy>=1.26.0

@@ -184,7 +184,7 @@ def main():
     cal_dir = Path(cfg.calibration.calibration_dir)
     feature_names = list(cfg.dataset.get("feature_names", [])) or None
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
-    forecast_days = list(cfg.graphcast.forecast_days)
+    forecast_days = list(cfg.nwp.forecast_days)
 
     import zarr
     root = zarr.open(str(cfg.dataset.zarr_store), mode="r")

@@ -1,9 +1,8 @@
 """
-Build the feature zarr store from raw GraphCast output.
+Build the feature zarr store from raw NWP forecast files.
 
-Expected filename format: weathernext_YYYYMMDDHH_FHR_mean.nc
+Source, filename pattern, and lead-time range are controlled by the nwp section of config.yaml.
 Init times are enumerated at 24-hourly frequency between --start and --end.
-Lead-time range is controlled by graphcast.lead_start / lead_end / lead_interval in config.yaml.
 
 Usage:
     # Single init time
@@ -25,7 +24,7 @@ from tqdm import tqdm
 
 from severe_weather.features import (
     extract_features,
-    load_graphcast_file,
+    load_nwp_file,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -52,8 +51,8 @@ def main():
     store_path = cfg.dataset.zarr_store
     root = zarr.open(store_path, mode="a")
 
-    lead_hours = list(range(cfg.graphcast.lead_start, cfg.graphcast.lead_end + 1, cfg.graphcast.lead_interval))
-    local_dir = Path(cfg.graphcast.local_dir)
+    lead_hours = list(range(cfg.nwp.lead_start, cfg.nwp.lead_end + 1, cfg.nwp.lead_interval))
+    local_dir = Path(cfg.nwp.local_dir)
 
     end = args.end or args.start
     init_range = pd.date_range(
@@ -62,19 +61,22 @@ def main():
         freq="24h",
     )
 
-    log.info(f"Processing {len(init_range)} init time(s), {len(lead_hours)} lead hour(s) each")
+    log.info(f"Source: {cfg.nwp.source} | {len(init_range)} init time(s), {len(lead_hours)} lead hour(s) each")
 
     feature_names: list[str] = []
     for init_dt in tqdm(init_range, desc="inits"):
         init_str = init_dt.strftime("%Y%m%d%H")
         for lead_h in lead_hours:
-            fpath = local_dir / f"weathernext_{init_str}_{lead_h:03d}_mean.nc"
+            fname = cfg.nwp.filename_pattern.format(
+                init_str=init_str, HH=init_str[-2:], lead=lead_h
+            )
+            fpath = local_dir / fname
             if not fpath.exists():
                 log.warning(f"Missing {fpath.name}, skipping")
                 continue
             try:
-                ds = load_graphcast_file(fpath)
-                step = ds.isel(prediction_timedelta=0) if "prediction_timedelta" in ds.dims else ds.isel(time=0)
+                ds = load_nwp_file(fpath, cfg.nwp.source)
+                step = ds.isel(prediction_timedelta=0) if "prediction_timedelta" in ds.dims else ds.isel(time=0) if "time" in ds.dims else ds
                 valid_dt = init_dt + pd.Timedelta(hours=lead_h)
                 feats, names = extract_features(step, cfg, lead_hour=lead_h, valid_time=valid_dt)
                 if not feature_names:

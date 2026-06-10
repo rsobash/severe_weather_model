@@ -1,8 +1,8 @@
 """
-Load GraphCast output, regrid to G212, compute derived features.
+Load NWP output (GraphCast NetCDF or GEFS GRIB), regrid to G212/G211, compute derived features.
 
-GraphCast NetCDF files are read from local disk (cfg.graphcast.local_dir).
-Each file covers one initialisation time; variables follow ERA5 naming.
+GraphCast files follow ERA5 variable naming. GEFS GRIB files are normalised to the same
+naming convention by _load_gefs before being passed to extract_features.
 """
 
 from __future__ import annotations
@@ -19,12 +19,110 @@ from .grid import get_grid_latlons, get_grid_params
 
 log = logging.getLogger(__name__)
 
-# ── Local file helpers ───────────────────────────────────────────────────────
+# ── File loaders ─────────────────────────────────────────────────────────────
+
+def load_nwp_file(path: str | Path, source: str) -> xr.Dataset:
+    """Load an NWP forecast file and return an ERA5-compatible xr.Dataset."""
+    if source == "graphcast":
+        return _load_graphcast(path)
+    if source == "gefs":
+        return _load_gefs(path)
+    raise ValueError(f"Unknown NWP source: {source!r}. Expected 'graphcast' or 'gefs'.")
 
 
-def load_graphcast_file(path: str | Path) -> xr.Dataset:
-    """Open a single GraphCast NetCDF file from disk."""
+def _load_graphcast(path: str | Path) -> xr.Dataset:
     return xr.open_dataset(path, engine="netcdf4")
+
+
+# GEFS GRIB shortName → ERA5 long name used by extract_features
+_GEFS_SURFACE_RENAME = {
+    "u10":   "10m_u_component_of_wind",
+    "v10":   "10m_v_component_of_wind",
+    "t2m":   "2m_temperature",
+    "d2m":   "2m_dewpoint_temperature",
+    "msl":   "mean_sea_level_pressure",
+    "prmsl": "mean_sea_level_pressure",
+    "sp":    "surface_pressure",
+    "cape":  "convective_available_potential_energy",
+    "tp":    "total_precipitation_6hr",
+}
+_GEFS_PLEVEL_RENAME = {
+    "u":  "u_component_of_wind",
+    "v":  "v_component_of_wind",
+    "t":  "temperature",
+    "q":  "specific_humidity",
+    "gh": "geopotential",          # converted from metres → m²/s² below
+}
+_G = 9.80665  # standard gravity (m/s²)
+
+
+def _load_gefs(path: str | Path) -> xr.Dataset:
+    """
+    Load a single GEFS ensemble-mean GRIB file and return an ERA5-compatible xr.Dataset.
+
+    Variable names, coordinate names (lat/lon), and the pressure-level dimension name
+    (level) are normalised so that extract_features works without modification.
+    """
+    try:
+        import cfgrib  # noqa: F401 — triggers a clear ImportError if eccodes missing
+    except ImportError as exc:
+        raise ImportError(
+            "cfgrib is required for GEFS GRIB support. "
+            "Install with: pip install cfgrib  (also needs eccodes: "
+            "conda install -c conda-forge eccodes  or  brew install eccodes)"
+        ) from exc
+
+    datasets: list[xr.Dataset] = []
+
+    # Surface / near-surface fields (multiple typeOfLevel values in one file)
+    for level_type in ("heightAboveGround", "meanSea", "surface"):
+        try:
+            ds = xr.open_dataset(
+                path, engine="cfgrib",
+                filter_by_keys={"typeOfLevel": level_type},
+                indexpath=None,
+            )
+            rename = {k: v for k, v in _GEFS_SURFACE_RENAME.items() if k in ds}
+            if rename:
+                ds = ds.rename(rename)
+            datasets.append(ds)
+        except Exception:
+            pass
+
+    # Pressure-level fields
+    try:
+        ds_pl = xr.open_dataset(
+            path, engine="cfgrib",
+            filter_by_keys={"typeOfLevel": "isobaricInhPa"},
+            indexpath=None,
+        )
+        rename = {k: v for k, v in _GEFS_PLEVEL_RENAME.items() if k in ds_pl}
+        ds_pl = ds_pl.rename(rename)
+        # gh (geopotential height, m) → geopotential (m²/s²) to match GraphCast/ERA5
+        if "geopotential" in ds_pl:
+            ds_pl["geopotential"] = ds_pl["geopotential"] * _G
+        # Rename pressure-level dim to "level" so extract_features .sel(level=...) works
+        if "isobaricInhPa" in ds_pl.dims:
+            ds_pl = ds_pl.rename({"isobaricInhPa": "level"})
+        datasets.append(ds_pl)
+    except Exception:
+        pass
+
+    if not datasets:
+        raise ValueError(f"No recognisable GRIB messages found in {path}")
+
+    merged = xr.merge(datasets, compat="override")
+
+    # Normalise coordinate names: latitude/longitude → lat/lon
+    coord_rename = {}
+    if "latitude" in merged.coords:
+        coord_rename["latitude"] = "lat"
+    if "longitude" in merged.coords:
+        coord_rename["longitude"] = "lon"
+    if coord_rename:
+        merged = merged.rename(coord_rename)
+
+    return merged
 
 
 # ── Regridding ───────────────────────────────────────────────────────────────
@@ -132,8 +230,8 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int, valid_time
         names.append("cape")
 
     # ── Pressure level fields ───────────────────────────────────────────────
-    for lvl in cfg.graphcast.pressure_levels:
-        for var in cfg.graphcast.pressure_vars:
+    for lvl in cfg.nwp.pressure_levels:
+        for var in cfg.nwp.pressure_vars:
             if var in ds:
                 field = _get(var, level=lvl)
                 channels.append(field)
