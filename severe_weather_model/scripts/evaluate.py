@@ -65,7 +65,8 @@ def main():
     hazard_channels = list(cfg.model.get("hazard_channels", [0, 1, 2, 3]))
     forecast_days = list(cfg.nwp.forecast_days)
     val_ds = SevereWindDataset(
-        zarr_store=cfg.dataset.zarr_store,
+        features_store=cfg.dataset.features_store,
+        labels_store=cfg.dataset.labels_store,
         start=args.val_start,
         end=args.val_end,
         forecast_days=forecast_days,
@@ -76,7 +77,8 @@ def main():
         hazard_channels=hazard_channels,
     )
     test_ds = SevereWindDataset(
-        zarr_store=cfg.dataset.zarr_store,
+        features_store=cfg.dataset.features_store,
+        labels_store=cfg.dataset.labels_store,
         start=args.test_start,
         end=args.test_end,
         forecast_days=forecast_days,
@@ -170,7 +172,8 @@ def main():
     by_day: dict = {}
     for day in forecast_days:
         day_ds = SevereWindDataset(
-            zarr_store=cfg.dataset.zarr_store,
+            features_store=cfg.dataset.features_store,
+            labels_store=cfg.dataset.labels_store,
             start=args.test_start,
             end=args.test_end,
             forecast_days=[day],

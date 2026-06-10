@@ -36,7 +36,7 @@ def main():
     args = parse_args()
     cfg = OmegaConf.load(args.config)
 
-    root = zarr.open(cfg.dataset.zarr_store, mode="a")
+    root = zarr.open(cfg.dataset.labels_store, mode="a")
 
     end = args.end or args.start
     dates = pd.date_range(
@@ -48,7 +48,7 @@ def main():
 
     log.info(f"Building labels for {len(valid_times)} convective day(s)")
     build_label_store(valid_times, cfg, root)
-    log.info(f"Label store → {cfg.dataset.zarr_store}")
+    log.info(f"Label store → {cfg.dataset.labels_store}")
 
 
 if __name__ == "__main__":

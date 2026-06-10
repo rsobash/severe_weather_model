@@ -69,9 +69,10 @@ def main():
     args = parse_args()
     show_stats = args.stats or args.per_lead
     cfg = OmegaConf.load(args.config)
-    root = zarr.open(cfg.dataset.zarr_store, mode="r")
+    features_root = zarr.open(cfg.dataset.features_store, mode="r")
+    labels_root = zarr.open(cfg.dataset.labels_store, mode="r")
 
-    feature_names = list(root.attrs.get("feature_names", []))
+    feature_names = list(features_root.attrs.get("feature_names", []))
     lead_hours = range(cfg.nwp.lead_start, cfg.nwp.lead_end + 1, cfg.nwp.lead_interval)
 
     print(f"\nFeature channels ({len(feature_names)}):")
@@ -85,10 +86,10 @@ def main():
     arrays_by_lead = []
     for lead_h in lead_hours:
         key = f"features/{args.init}_f{lead_h:03d}"
-        if key not in root:
+        if key not in features_root:
             print(f"  f{lead_h:03d}  MISSING")
             continue
-        arr = root[key][:]  # (C, NY, NX)
+        arr = features_root[key][:]  # (C, NY, NX)
         if show_stats:
             arrays_by_lead.append((lead_h, arr))
         nan_in_conus = np.isnan(arr) & conus_mask[np.newaxis, :, :]
@@ -113,10 +114,10 @@ def main():
     label_key = f"labels/{args.init[:8]}12"
     print(f"\nNaN check for labels {label_key} (CONUS domain only):")
     hazard_names = ["wind", "hail", "tornado"]
-    if label_key not in root:
+    if label_key not in labels_root:
         print("  MISSING")
     else:
-        arr = root[label_key][:]  # (3, NY, NX)
+        arr = labels_root[label_key][:]  # (3, NY, NX)
         nan_in_conus = np.isnan(arr) & conus_mask[np.newaxis, :, :]
         if nan_in_conus.any():
             nan_counts = nan_in_conus.reshape(arr.shape[0], -1).sum(axis=1)

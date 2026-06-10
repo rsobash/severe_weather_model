@@ -187,7 +187,7 @@ def main():
     forecast_days = list(cfg.nwp.forecast_days)
 
     import zarr
-    root = zarr.open(str(cfg.dataset.zarr_store), mode="r")
+    root = zarr.open(str(cfg.dataset.features_store), mode="r")
     stats = np.load(cfg.dataset.normalization_stats)
     mean, std = stats["mean"], stats["std"]
 

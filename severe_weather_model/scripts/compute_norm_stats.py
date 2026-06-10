@@ -45,11 +45,10 @@ def main():
         return
     domain_mask = np.load(mask_path).ravel()  # (H*W,) boolean
 
-    store_path = cfg.dataset.zarr_store
-    root = zarr.open(store_path, mode="r")
+    root = zarr.open(cfg.dataset.features_store, mode="r")
 
     if "features" not in root:
-        log.error("No 'features' group found in zarr store.")
+        log.error("No 'features' group found in feature store.")
         return
 
     all_keys = sorted(root["features"].keys())

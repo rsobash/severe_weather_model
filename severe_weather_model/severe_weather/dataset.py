@@ -25,7 +25,8 @@ class SevereWindDataset(Dataset):
 
     def __init__(
         self,
-        zarr_store: str | Path,
+        features_store: str | Path,
+        labels_store: str | Path,
         start: str,                   # YYYYMMDDHH, inclusive
         end: str,                     # YYYYMMDDHH, inclusive
         forecast_days: list[int],
@@ -45,12 +46,13 @@ class SevereWindDataset(Dataset):
             )
         self.domain_mask: np.ndarray = np.load(mask_path)
 
-        self.root = zarr.open(str(zarr_store), mode="r")
+        self.features_root = zarr.open(str(features_store), mode="r")
+        self.labels_root = zarr.open(str(labels_store), mode="r")
         stats = np.load(norm_stats_path)
         self.mean = stats["mean"]
         self.std = stats["std"]
 
-        stored_names = list(self.root.attrs.get("feature_names", []))
+        stored_names = list(self.features_root.attrs.get("feature_names", []))
         if feature_names:
             unknown = [n for n in feature_names if n not in stored_names]
             if unknown:
@@ -71,7 +73,7 @@ class SevereWindDataset(Dataset):
             for day in forecast_days
         ]
 
-        all_feature_keys = list(self.root["features"].keys())
+        all_feature_keys = list(self.features_root["features"].keys())
         feat_set = set(all_feature_keys)
         self.samples: list[tuple[list[str], str]] = []  # (feat_keys, label_key)
 
@@ -89,7 +91,7 @@ class SevereWindDataset(Dataset):
                 continue
             init_dates.add(date_part)
 
-        label_keys = set(self.root.get("labels", {}).keys())
+        label_keys = set(self.labels_root.get("labels", {}).keys())
         for date_part in sorted(init_dates):
             init_dt = datetime.strptime(date_part, "%Y%m%d%H")
             for period_leads in forecast_periods:
@@ -105,7 +107,7 @@ class SevereWindDataset(Dataset):
         self._pos_idx: list[int] = []
         self._neg_idx: list[int] = []
         for i, (_, lk) in enumerate(self.samples):
-            if self.root["labels"][lk][:].max() > 0:
+            if self.labels_root["labels"][lk][:].max() > 0:
                 self._pos_idx.append(i)
             else:
                 self._neg_idx.append(i)
@@ -123,14 +125,14 @@ class SevereWindDataset(Dataset):
         feat_keys, lk = self.samples[idx]
         stacked = []
         for fk in feat_keys:
-            arr = self.root["features"][fk][:]        # (C, H, W)
+            arr = self.features_root["features"][fk][:]        # (C, H, W)
             if self._feat_idx is not None:
                 arr = arr[self._feat_idx]             # (C_sel, H, W)
             arr = normalize(arr, self.mean, self.std)
             stacked.append(arr)
         features = np.nan_to_num(np.concatenate(stacked, axis=0), nan=0.0)  # (4*C_sel, H, W)
 
-        label = self.root["labels"][lk][:]               # (3, H, W)
+        label = self.labels_root["labels"][lk][:]               # (3, H, W)
         any_ch = label.max(axis=0, keepdims=True)        # (1, H, W)
         label = np.concatenate([label, any_ch], axis=0)  # (4, H, W)
         label = label[self._hazard_channels]              # (C_out, H, W)
@@ -155,7 +157,8 @@ def make_dataloaders(
 
     conus_mask_path = cfg.domain.conus_mask_path
     train_ds = SevereWindDataset(
-        zarr_store=cfg.dataset.zarr_store,
+        features_store=cfg.dataset.features_store,
+        labels_store=cfg.dataset.labels_store,
         start=train_start,
         end=train_end,
         forecast_days=forecast_days,
@@ -166,7 +169,8 @@ def make_dataloaders(
         hazard_channels=hazard_channels,
     )
     val_ds = SevereWindDataset(
-        zarr_store=cfg.dataset.zarr_store,
+        features_store=cfg.dataset.features_store,
+        labels_store=cfg.dataset.labels_store,
         start=val_start,
         end=val_end,
         forecast_days=forecast_days,

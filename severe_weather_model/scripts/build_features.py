@@ -45,10 +45,10 @@ def main():
     args = parse_args()
     cfg = OmegaConf.load(args.config)
 
-    out_dir = Path(cfg.dataset.zarr_store).parent
+    out_dir = Path(cfg.dataset.features_store).parent
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    store_path = cfg.dataset.zarr_store
+    store_path = cfg.dataset.features_store
     root = zarr.open(store_path, mode="a")
 
     lead_hours = list(range(cfg.nwp.lead_start, cfg.nwp.lead_end + 1, cfg.nwp.lead_interval))
@@ -94,7 +94,7 @@ def main():
         root.attrs["feature_names"] = feature_names
         log.info(f"Feature names ({len(feature_names)}): {feature_names}")
 
-    log.info(f"Feature store → {store_path}")
+    log.info(f"Feature store → {cfg.dataset.features_store}")
 
 
 if __name__ == "__main__":
