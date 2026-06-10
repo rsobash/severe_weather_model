@@ -107,6 +107,19 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
 
     merged = xr.merge(datasets, compat="override")
 
+    # Rename GRIB shortNames → ERA5 long names
+    var_rename = {k: v for k, v in {**_GEFS_SURFACE_RENAME, **_GEFS_PLEVEL_RENAME}.items() if k in merged}
+    if var_rename:
+        merged = merged.rename(var_rename)
+
+    # gh (geopotential height, m) → geopotential (m²/s²) to match GraphCast/ERA5
+    if "geopotential" in merged:
+        merged["geopotential"] = merged["geopotential"] * _G
+
+    # Rename pressure-level dim to "level" so extract_features .sel(level=...) works
+    if "isobaricInhPa" in merged.dims:
+        merged = merged.rename({"isobaricInhPa": "level"})
+
     # Normalise coordinate names: latitude/longitude → lat/lon
     coord_rename = {}
     if "latitude" in merged.coords:
