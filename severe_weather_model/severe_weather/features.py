@@ -72,41 +72,35 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
             "conda install -c conda-forge eccodes  or  brew install eccodes)"
         ) from exc
 
+    # Open each variable individually to avoid cfgrib coordinate conflicts that arise
+    # when variables share a typeOfLevel but have different level values (e.g. 2m vs 10m)
+    # or different level sets across pressure-level variables.
     datasets: list[xr.Dataset] = []
 
-    # Surface / near-surface fields (multiple typeOfLevel values in one file)
-    for level_type in ("heightAboveGround", "meanSea", "surface"):
+    def _open_var(short_name: str, level_type: str, level: int | None = None) -> None:
+        keys: dict = {"typeOfLevel": level_type, "shortName": short_name}
+        if level is not None:
+            keys["level"] = level
         try:
-            ds = xr.open_dataset(
-                path, engine="cfgrib",
-                filter_by_keys={"typeOfLevel": level_type},
-                indexpath=None,
-            )
-            rename = {k: v for k, v in _GEFS_SURFACE_RENAME.items() if k in ds}
-            if rename:
-                ds = ds.rename(rename)
+            ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=keys, indexpath=None)
             datasets.append(ds)
         except Exception:
             pass
 
-    # Pressure-level fields
-    try:
-        ds_pl = xr.open_dataset(
-            path, engine="cfgrib",
-            filter_by_keys={"typeOfLevel": "isobaricInhPa"},
-            indexpath=None,
-        )
-        rename = {k: v for k, v in _GEFS_PLEVEL_RENAME.items() if k in ds_pl}
-        ds_pl = ds_pl.rename(rename)
-        # gh (geopotential height, m) → geopotential (m²/s²) to match GraphCast/ERA5
-        if "geopotential" in ds_pl:
-            ds_pl["geopotential"] = ds_pl["geopotential"] * _G
-        # Rename pressure-level dim to "level" so extract_features .sel(level=...) works
-        if "isobaricInhPa" in ds_pl.dims:
-            ds_pl = ds_pl.rename({"isobaricInhPa": "level"})
-        datasets.append(ds_pl)
-    except Exception:
-        pass
+    # Surface / near-surface — one call per variable
+    _open_var("u10",   "heightAboveGround", level=10)
+    _open_var("v10",   "heightAboveGround", level=10)
+    _open_var("t2m",   "heightAboveGround", level=2)
+    _open_var("d2m",   "heightAboveGround", level=2)
+    _open_var("msl",   "meanSea")
+    _open_var("prmsl", "meanSea")
+    _open_var("sp",    "surface")
+    _open_var("cape",  "surface")
+    _open_var("tp",    "surface")
+
+    # Pressure-level fields — one call per variable to avoid level-set conflicts
+    for short_name in ("u", "v", "t", "q", "gh"):
+        _open_var(short_name, "isobaricInhPa")
 
     if not datasets:
         raise ValueError(f"No recognisable GRIB messages found in {path}")
