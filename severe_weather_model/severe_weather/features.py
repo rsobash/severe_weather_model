@@ -34,12 +34,17 @@ def _load_graphcast(path: str | Path) -> xr.Dataset:
     return xr.open_dataset(path, engine="netcdf4")
 
 
-# GEFS GRIB shortName → ERA5 long name used by extract_features
+# GEFS GRIB shortName → ERA5 long name used by extract_features.
+# ecCodes (cfgrib) shortNames differ between NCEP and ECMWF conventions; include both.
 _GEFS_SURFACE_RENAME = {
-    "u10":   "10m_u_component_of_wind",
+    "u10":   "10m_u_component_of_wind",   # NCEP convention
+    "10u":   "10m_u_component_of_wind",   # ECMWF/ecCodes convention
     "v10":   "10m_v_component_of_wind",
+    "10v":   "10m_v_component_of_wind",
     "t2m":   "2m_temperature",
+    "2t":    "2m_temperature",             # ECMWF/ecCodes convention
     "d2m":   "2m_dewpoint_temperature",
+    "2d":    "2m_dewpoint_temperature",
     "msl":   "mean_sea_level_pressure",
     "prmsl": "mean_sea_level_pressure",
     "sp":    "surface_pressure",
@@ -77,21 +82,24 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
     # or different level sets across pressure-level variables.
     datasets: list[xr.Dataset] = []
 
-    def _open_var(short_name: str, level_type: str, level: int | None = None) -> None:
-        keys: dict = {"typeOfLevel": level_type, "shortName": short_name}
-        if level is not None:
-            keys["level"] = level
-        try:
-            ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=keys, indexpath=None)
-            datasets.append(ds)
-        except Exception:
-            pass
+    def _open_var(short_name: str, level_type: str, level: int | None = None,
+                  aliases: tuple[str, ...] = ()) -> None:
+        for name in (short_name, *aliases):
+            keys: dict = {"typeOfLevel": level_type, "shortName": name}
+            if level is not None:
+                keys["level"] = level
+            try:
+                ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=keys, indexpath=None)
+                datasets.append(ds)
+                return
+            except Exception:
+                continue
 
-    # Surface / near-surface — one call per variable
-    _open_var("u10",   "heightAboveGround", level=10)
-    _open_var("v10",   "heightAboveGround", level=10)
-    _open_var("t2m",   "heightAboveGround", level=2)
-    _open_var("d2m",   "heightAboveGround", level=2)
+    # Surface / near-surface — try both NCEP ("u10") and ECMWF/ecCodes ("10u") shortNames
+    _open_var("u10",   "heightAboveGround", level=10, aliases=("10u",))
+    _open_var("v10",   "heightAboveGround", level=10, aliases=("10v",))
+    _open_var("t2m",   "heightAboveGround", level=2,  aliases=("2t",))
+    _open_var("d2m",   "heightAboveGround", level=2,  aliases=("2d",))
     _open_var("msl",   "meanSea")
     _open_var("prmsl", "meanSea")
     _open_var("sp",    "surface")
