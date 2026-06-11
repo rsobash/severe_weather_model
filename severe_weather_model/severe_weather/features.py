@@ -45,6 +45,8 @@ _GEFS_SURFACE_RENAME = {
     "2t":    "2m_temperature",             # ECMWF/ecCodes convention
     "d2m":   "2m_dewpoint_temperature",
     "2d":    "2m_dewpoint_temperature",
+    "r2":    "2m_relative_humidity",       # NCEP convention
+    "2r":    "2m_relative_humidity",       # ECMWF/ecCodes convention
     "msl":   "mean_sea_level_pressure",
     "prmsl": "mean_sea_level_pressure",
     "sp":    "surface_pressure",
@@ -56,6 +58,7 @@ _GEFS_PLEVEL_RENAME = {
     "v":  "v_component_of_wind",
     "t":  "temperature",
     "q":  "specific_humidity",
+    "r":  "relative_humidity",
     "gh": "geopotential",          # converted from metres → m²/s² below
 }
 _G = 9.80665  # standard gravity (m/s²)
@@ -90,8 +93,9 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
                 keys["level"] = level
             try:
                 ds = xr.open_dataset(path, engine="cfgrib", filter_by_keys=keys, indexpath=None)
-                datasets.append(ds)
-                return
+                if ds.data_vars:
+                    datasets.append(ds)
+                    return
             except Exception:
                 continue
 
@@ -100,6 +104,7 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
     _open_var("v10",   "heightAboveGround", level=10, aliases=("10v",))
     _open_var("t2m",   "heightAboveGround", level=2,  aliases=("2t",))
     _open_var("d2m",   "heightAboveGround", level=2,  aliases=("2d",))
+    _open_var("r2",    "heightAboveGround", level=2,  aliases=("2r",))  # 2-m RH (present in GEFS when d2m is absent)
     _open_var("msl",   "meanSea")
     _open_var("prmsl", "meanSea")
     _open_var("sp",    "surface")
@@ -107,7 +112,7 @@ def _load_gefs(path: str | Path) -> xr.Dataset:
     _open_var("tp",    "surface")
 
     # Pressure-level fields — one call per variable to avoid level-set conflicts
-    for short_name in ("u", "v", "t", "q", "gh"):
+    for short_name in ("u", "v", "t", "q", "r", "gh"):
         _open_var(short_name, "isobaricInhPa")
 
     if not datasets:
@@ -206,6 +211,25 @@ def _lapse_rate(t700: np.ndarray, t500: np.ndarray) -> np.ndarray:
     return ((t700 - t500) / (z500 - z700) * 1000).astype(np.float32)
 
 
+def _rh_to_specific_humidity(rh_pct: np.ndarray, temp_k: np.ndarray, pressure_pa: float) -> np.ndarray:
+    """Convert relative humidity (%) to specific humidity (kg/kg) via Magnus formula."""
+    tc = temp_k - 273.15
+    e_s = 611.2 * np.exp(17.67 * tc / (tc + 243.5))          # saturation vapour pressure [Pa]
+    e = np.clip(rh_pct / 100.0, 0.0, 1.0) * e_s              # actual vapour pressure [Pa]
+    q = 0.622 * e / (pressure_pa - 0.378 * e)
+    return np.maximum(q, 0.0).astype(np.float32)
+
+
+def _rh_to_dewpoint(rh_pct: np.ndarray, temp_k: np.ndarray) -> np.ndarray:
+    """Convert relative humidity (%) + temperature (K) to dewpoint temperature (K)."""
+    tc = temp_k - 273.15
+    e_s = 611.2 * np.exp(17.67 * tc / (tc + 243.5))
+    e = np.clip(rh_pct / 100.0, 1e-6, 1.0) * e_s
+    log_e = np.log(e / 611.2)
+    td_c = 243.5 * log_e / (17.67 - log_e)
+    return (td_c + 273.15).astype(np.float32)
+
+
 # ── Main feature extraction ───────────────────────────────────────────────────
 
 def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int, valid_time=None) -> tuple[np.ndarray, list[str]]:
@@ -217,6 +241,35 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int, valid_time
     grid_name = cfg.domain.grid
     lats = ds.lat.values
     lons = ds.lon.values
+
+    # Synthesise specific_humidity from relative_humidity when q is absent (e.g. GEFS GRIB2)
+    if "specific_humidity" not in ds and "relative_humidity" in ds and "temperature" in ds:
+        rh_da = ds["relative_humidity"]
+        t_da = ds["temperature"]
+        if "level" in rh_da.dims and "level" in t_da.dims:
+            common_levels = np.intersect1d(rh_da.level.values, t_da.level.values)
+            q_vals = np.stack([
+                _rh_to_specific_humidity(
+                    rh_da.sel(level=lvl).values.squeeze(),
+                    t_da.sel(level=lvl).values.squeeze(),
+                    float(lvl) * 100.0,
+                )
+                for lvl in common_levels
+            ], axis=0)
+            ds = ds.assign(specific_humidity=rh_da.sel(level=common_levels).copy(data=q_vals))
+            log.debug("Synthesised specific_humidity from relative_humidity at %d levels", len(common_levels))
+
+    # Synthesise 2m_dewpoint_temperature from 2m_relative_humidity when d2m is absent (e.g. GEFS GRIB2)
+    if "2m_dewpoint_temperature" not in ds and "2m_relative_humidity" in ds and "2m_temperature" in ds:
+        r2m_vals = ds["2m_relative_humidity"].values.squeeze()
+        t2m_vals = ds["2m_temperature"].values.squeeze()
+        ds = ds.assign(**{
+            "2m_dewpoint_temperature": ds["2m_relative_humidity"].copy(
+                data=_rh_to_dewpoint(r2m_vals, t2m_vals)
+            )
+        })
+        log.debug("Synthesised 2m_dewpoint_temperature from 2m_relative_humidity")
+
     channels: list[np.ndarray] = []
     names: list[str] = []
 
@@ -239,6 +292,10 @@ def extract_features(ds: xr.Dataset, cfg: DictConfig, lead_hour: int, valid_time
     if "2m_dewpoint_temperature" in ds:
         channels.append(_get("2m_dewpoint_temperature"))
         names.append("d2m")
+
+    if "2m_relative_humidity" in ds:
+        channels.append(_get("2m_relative_humidity"))
+        names.append("r2m")
 
     if "convective_available_potential_energy" in ds:
         channels.append(_get("convective_available_potential_energy"))
