@@ -10,6 +10,11 @@ Usage:
         --train-start 2016010100 --train-end 2021123118 \\
         --val-start 2022010100 --val-end 2022123118 \\
         training.lr=5e-5 model.encoder=resnet18
+    # Fine-tune from a pretrained checkpoint:
+    python scripts/train.py --config config.yaml \\
+        --train-start 2016010100 --train-end 2021123118 \\
+        --val-start 2022010100 --val-end 2022123118 \\
+        --pretrained-checkpoint models/checkpoints/best.pt
 """
 
 import argparse
@@ -42,6 +47,8 @@ def parse_args():
                    help="First init time for validation (inclusive)")
     p.add_argument("--val-end", required=True, metavar="YYYYMMDDHH",
                    help="Last init time for validation (inclusive)")
+    p.add_argument("--pretrained-checkpoint", metavar="PATH",
+                   help="Path to a checkpoint (best.pt or final.pt) to initialise weights from before training")
     p.add_argument("overrides", nargs="*", help="OmegaConf dot-path overrides, e.g. training.lr=1e-4")
     return p.parse_args()
 
@@ -78,6 +85,15 @@ def main():
 
     log.info("Building model …")
     model = build_model(cfg, in_channels=in_channels)
+    if args.pretrained_checkpoint:
+        ckpt_path = Path(args.pretrained_checkpoint)
+        if not ckpt_path.exists():
+            log.error(f"Pretrained checkpoint not found: {ckpt_path}")
+            sys.exit(1)
+        ckpt = torch.load(ckpt_path, map_location="cpu")
+        state = ckpt.get("model_state", ckpt)
+        model.load_state_dict(state, strict=True)
+        log.info(f"  Loaded pretrained weights from {ckpt_path}")
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     log.info(f"  {n_params:,} trainable parameters")
 
