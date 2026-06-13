@@ -63,7 +63,8 @@ def train(
     model.to(device)
     loss_fn.to(device)
 
-    best_val_loss = float("inf")
+    es_metric = getattr(tc, "early_stopping_metric", "val_loss")
+    best_score = float("inf")
     patience_counter = 0
 
     for epoch in range(1, tc.max_epochs + 1):
@@ -94,6 +95,7 @@ def train(
         # ── Validate ─────────────────────────────────────────────────────────
         model.eval()
         val_loss = 0.0
+        se_sum, lbl_sum, total_px = 0.0, 0.0, 0.0
         with torch.no_grad():
             for features, labels in tqdm(val_dl, desc=f"Epoch {epoch} val", leave=False):
                 features = features.to(device, non_blocking=True)
@@ -102,18 +104,32 @@ def train(
                     logits = model(features)
                     loss = loss_fn(logits, labels, domain_mask=domain_mask)
                 val_loss += loss.item()
+                probs = torch.sigmoid(logits.float())
+                lf = labels.float()
+                if domain_mask is not None:
+                    m = domain_mask.bool()
+                    se_sum  += ((probs - lf).pow(2) * m).sum().item()
+                    lbl_sum += (lf * m).sum().item()
+                    total_px += m.sum().item() * probs.size(0) * probs.size(1)
+                else:
+                    se_sum  += (probs - lf).pow(2).sum().item()
+                    lbl_sum += lf.sum().item()
+                    total_px += probs.numel()
         val_loss /= len(val_dl)
+        clim = lbl_sum / total_px
+        val_bss = 1.0 - (se_sum / total_px) / (clim * (1 - clim) + 1e-10)
 
         lr = optimizer.param_groups[0]["lr"]
-        log.info(f"Epoch {epoch:3d}  train={train_loss:.4f}  val={val_loss:.4f}  lr={lr:.2e}")
+        log.info(f"Epoch {epoch:3d}  train={train_loss:.4f}  val_loss={val_loss:.4f}  val_bss={val_bss:.4f}  lr={lr:.2e}")
 
         # ── Checkpoint ───────────────────────────────────────────────────────
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        score = val_loss if es_metric == "val_loss" else -val_bss
+        if score < best_score:
+            best_score = score
             patience_counter = 0
             ckpt_path = ckpt_dir / "best.pt"
             torch.save({"epoch": epoch, "model_state": model.state_dict(),
-                        "val_loss": val_loss}, ckpt_path)
+                        "val_loss": val_loss, "val_bss": val_bss}, ckpt_path)
             log.info(f"  Saved best checkpoint → {ckpt_path}")
         else:
             patience_counter += 1
@@ -128,6 +144,6 @@ def train(
         return model
     best = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(best["model_state"])
-    log.info(f"Loaded best weights from epoch {best['epoch']} (val_loss={best['val_loss']:.4f})")
+    log.info(f"Loaded best weights from epoch {best['epoch']} (val_loss={best['val_loss']:.4f}  val_bss={best.get('val_bss', float('nan')):.4f})")
 
     return model
