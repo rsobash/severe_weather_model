@@ -27,6 +27,7 @@ def build_model(cfg: DictConfig, in_channels: int | None = None) -> nn.Module:
         classes=out_channels,
         decoder_channels=list(c.decoder_channels),
         decoder_use_batchnorm=True,
+        decoder_dropout=c.dropout,
         activation=None,            # raw logits; sigmoid applied at inference/loss
     )
     return model
