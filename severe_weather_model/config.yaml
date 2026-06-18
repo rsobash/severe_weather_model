@@ -119,6 +119,8 @@ model:
   hazard_channels: [0, 1, 2, 3]  # 0=wind 1=hail 2=tornado 3=any; subset e.g. [2] for tornado only
   decoder_channels: [256, 128, 64, 32, 16]
   dropout: 0.2
+  film_conditioning: true         # FiLM-modulate the encoder bottleneck on temporal channels
+  film_channels: [lead_norm, doy_sin, doy_cos, hod_sin, hod_cos]  # per-lead channels read for conditioning
 
 # ── Loss ─────────────────────────────────────────────────────────────────────
 loss:

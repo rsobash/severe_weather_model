@@ -211,7 +211,8 @@ def main():
     log.info(f"in_channels={in_channels}, hazard_channels={hazard_channels}, device={device}")
 
     # Load model once
-    model = build_model(cfg, in_channels=in_channels)
+    per_lead_names = feature_names if feature_names else stored_names
+    model = build_model(cfg, in_channels=in_channels, feature_names=per_lead_names)
     ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt.get("model_state", ckpt))
     model.to(device)

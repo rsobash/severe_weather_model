@@ -84,7 +84,8 @@ def main():
     log.info(f"  in_channels={in_channels}")
 
     log.info("Building model …")
-    model = build_model(cfg, in_channels=in_channels)
+    model = build_model(cfg, in_channels=in_channels,
+                        feature_names=train_dl.dataset.feature_names)
     if args.pretrained_checkpoint:
         ckpt_path = Path(args.pretrained_checkpoint)
         if not ckpt_path.exists():

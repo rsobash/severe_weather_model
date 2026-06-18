@@ -93,7 +93,7 @@ def main():
     sample_feats, _ = val_ds[0]
     in_channels = sample_feats.shape[0]
 
-    model = build_model(cfg, in_channels=in_channels)
+    model = build_model(cfg, in_channels=in_channels, feature_names=val_ds.feature_names)
     ckpt = torch.load(args.checkpoint, map_location=device)
     state = ckpt.get("model_state", ckpt)
     model.load_state_dict(state)

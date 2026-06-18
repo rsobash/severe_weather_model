@@ -61,8 +61,10 @@ class SevereWindDataset(Dataset):
             self._feat_idx = np.array([stored_names.index(n) for n in feature_names])
             self.mean = self.mean[self._feat_idx]
             self.std = self.std[self._feat_idx]
+            self.feature_names = list(feature_names)
         else:
             self._feat_idx = None
+            self.feature_names = stored_names
 
         start_dt = datetime.strptime(start, "%Y%m%d%H")
         end_dt = datetime.strptime(end, "%Y%m%d%H")
