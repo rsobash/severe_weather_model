@@ -45,16 +45,30 @@ class TemporalConditionedUNet(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(cond_dim * 4, 2 * bottleneck_channels),
         )
+        # Per-call (gamma, beta), set in forward and consumed by the encoder hook.
+        self._film_params: tuple[torch.Tensor, torch.Tensor] | None = None
+        # Intercept the encoder output rather than reimplementing SMP's
+        # encoder→decoder→head wiring (which differs across SMP versions).
+        self.unet.encoder.register_forward_hook(self._apply_film)
+
+    def _apply_film(self, module, inputs, output):
+        if self._film_params is None:
+            return output
+        gamma, beta = self._film_params
+        output = list(output)
+        output[-1] = gamma * output[-1] + beta
+        return output
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         cond = x[:, self.temporal_ch, 0, 0]              # (B, cond_dim)
         gamma, beta = self.film_mlp(cond).chunk(2, dim=-1)
         gamma = gamma[:, :, None, None] + 1.0            # residual init → identity at start
         beta = beta[:, :, None, None]
-        features = list(self.unet.encoder(x))
-        features[-1] = gamma * features[-1] + beta
-        decoder_out = self.unet.decoder(*features)
-        return self.unet.segmentation_head(decoder_out)
+        self._film_params = (gamma, beta)
+        try:
+            return self.unet(x)                          # SMP wires encoder→decoder→head
+        finally:
+            self._film_params = None
 
 
 def build_model(
