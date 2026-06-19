@@ -89,12 +89,14 @@ def build_model(
     c = cfg.model
     n_ch = in_channels if in_channels is not None else c.in_channels
     out_channels = len(list(c.hazard_channels))
+    decoder_channels = list(c.decoder_channels)
     model = smp.Unet(
         encoder_name=c.encoder,
         encoder_weights=c.encoder_weights,
         in_channels=n_ch,
         classes=out_channels,
-        decoder_channels=list(c.decoder_channels),
+        encoder_depth=len(decoder_channels),
+        decoder_channels=decoder_channels,
         decoder_use_batchnorm=True,
         decoder_dropout=c.dropout,
         activation=None,            # raw logits; sigmoid applied at inference/loss
